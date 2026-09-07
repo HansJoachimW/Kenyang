@@ -237,7 +237,16 @@ final class RoundAgent {
         let names = input.sightings.map(\.name).joined(separator: ", ")
         let session = LanguageModelSession(instructions: Self.instructions)
         do {
-            var intent = try await retrying("setIntent") {
+            var intent = try await retrying("setIntent", narrowed: {
+                try await LanguageModelSession(instructions: Self.instructions).respond(
+                    to: """
+                        Round \(input.roundIndex). Capacity left: about \
+                        \(String(format: "%.1f", input.capacity.plateEstimate)) plates.
+                        Set the objective for this round. Leave learnAbout empty.
+                        """,
+                    generating: RoundIntent.self
+                ).content
+            }) {
                 try await session.respond(
                     to: """
                         Dishes available: \(names)
@@ -269,28 +278,54 @@ final class RoundAgent {
         }
     }
 
-    /// One retry on a transient generation failure. TESTS.md §5, 2026-09-04:
-    /// `RoundDecision` fails to decode on roughly one call in five — the model
-    /// writes correct prose instead of JSON. The failures are independent, so a
-    /// single retry takes ~20% to ~4%. `guardrailViolation` is retried on the
-    /// same grounds (TESTS.md T57 — blocks are non-deterministic).
+    private enum GenerationFailure {
+        case transient
+        case overflow
+        case fatal
+    }
+
     private func retrying<T>(_ label: String,
+                             narrowed: (() async throws -> T)? = nil,
                              _ body: () async throws -> T) async throws -> T {
         do {
             return try await body()
         } catch {
-            guard Self.isTransient(error), budget.consumeCall() else { throw error }
-            trace.record(kind: .modelFailure,
-                         title: "retry",
-                         detail: "\(label): \(Self.describe(error)) — retrying once",
-                         deterministic: true)
-            return try await body()
+            switch Self.classify(error) {
+            case .transient:
+                guard budget.consumeCall() else { throw error }
+                trace.record(kind: .modelFailure,
+                             title: "retry",
+                             detail: "\(label): \(Self.describe(error)) — retrying once",
+                             deterministic: true)
+                return try await body()
+
+            case .overflow:
+                guard let narrowed, budget.consumeCall() else {
+                    trace.record(kind: .modelFailure,
+                                 title: "context overflow",
+                                 detail: "\(label): the window filled during generation and there is no narrower request to fall back to.",
+                                 deterministic: true)
+                    throw error
+                }
+                trace.record(kind: .modelFailure,
+                             title: "context overflow",
+                             detail: "\(label): the window filled during generation — retrying once on a fresh session with a narrowed request.",
+                             deterministic: true)
+                return try await narrowed()
+
+            case .fatal:
+                throw error
+            }
         }
     }
 
-    private static func isTransient(_ error: Error) -> Bool {
-        let text = "\(error)"
-        return text.contains("decodingFailure") || text.contains("guardrailViolation")
+    private static func classify(_ error: Error) -> GenerationFailure {
+        guard let generation = error as? LanguageModelSession.GenerationError else { return .fatal }
+        switch generation {
+        case .decodingFailure, .guardrailViolation: return .transient
+        case .exceededContextWindowSize: return .overflow
+        default: return .fatal
+        }
     }
 
     private func deterministicVerdict(_ h: ValueHypothesis, events: [TasteEvent]) -> HypothesisVerdict {
@@ -346,11 +381,21 @@ final class RoundAgent {
     }
 
     private static func describe(_ error: Error) -> String {
-        let text = "\(error)"
-        if text.contains("guardrailViolation") { return "Safety guardrail declined this request" }
-        if text.contains("exceededContextWindowSize") { return "Context window exceeded" }
-        if text.contains("unsupportedLanguageOrLocale") { return "Unsupported language for the on-device model" }
-        return String(text.prefix(120))
+        guard let generation = error as? LanguageModelSession.GenerationError else {
+            return String("\(error)".prefix(120))
+        }
+        switch generation {
+        case .guardrailViolation: return "Safety guardrail declined this request"
+        case .exceededContextWindowSize: return "Context window exceeded"
+        case .unsupportedLanguageOrLocale: return "Unsupported language for the on-device model"
+        case .unsupportedGuide: return "A generation guide is not supported by this model"
+        case .decodingFailure: return "The answer did not decode into the expected shape"
+        case .assetsUnavailable: return "Model assets are unavailable"
+        case .rateLimited: return "Rate limited"
+        case .concurrentRequests: return "Another request is already running on this session"
+        case .refusal: return "The model refused this request"
+        default: return String("\(generation)".prefix(120))
+        }
     }
 
     static let instructions = """
