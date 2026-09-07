@@ -1,0 +1,55 @@
+## macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+## Xcode — per-user state
+## xcuserdata holds window layout, breakpoints, scheme selection and
+## UserInterfaceState.xcuserstate, which rewrites itself on almost every
+## interaction with the IDE. None of it belongs to the project.
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad
+
+## Xcode — build products and intermediates
+build/
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.xcarchive
+*.perspectivev3
+!default.perspectivev3
+
+## Xcode — workspace metadata that is machine-local
+*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+*.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings
+*.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+
+## Swift Package Manager
+.build/
+.swiftpm/xcode/package.xcworkspace/xcuserdata/
+Packages/
+Package.resolved.bak
+
+## Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+## Instruments
+*.trace
+
+## Crash and console dumps from simctl runs
+*.crash
+*.ips
+
+## Secrets — nothing here today, and the point is to keep it that way
+*.p12
+*.mobileprovision
+.env
+.env.*
+!.env.example
