@@ -71,10 +71,17 @@ struct RoundPlanner {
             }
             value *= SatietyDiscount.discount(for: sighting, history: simulated)
 
-            let informationGain = posterior.uncertainty * objective.reconShare.fraction
-            value += informationGain * 0.8
+            let recon = objective.reconShare.fraction
 
-            if learnSet.contains(sighting.name.lowercased()) { value += 0.5 }
+            value += posterior.uncertainty * recon * 0.8
+
+            let stationsChosen = Set(alreadyChosen.map(\.station))
+            let coverage = stationsChosen.contains(sighting.station) ? -1.0 : 1.0
+            value += coverage * recon * 0.9
+
+            value += (1 - recon) * posterior.mean * 0.7
+
+            if learnSet.contains(sighting.name.lowercased()) { value += 0.5 * (0.4 + recon) }
             if let avoid = objective.avoidProfile, sighting.flavour.axes.contains(avoid) {
                 value -= 0.6
             }

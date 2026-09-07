@@ -18,6 +18,46 @@ struct KenyangApp: App {
             RootView()
                 .environment(\.kenyangStore, store)
                 .modelContainer(store.container)
+                .task {
+                    // TESTS.md T50/T51/T52 harness — see Verification/TokenAudit.swift
+                    let args = CommandLine.arguments
+                    let all = args.contains("--run-all")
+
+                    if all || args.contains("--verify") {
+                        let runner = VerificationRunner(store: store)
+                        await runner.runAll()
+                        if !all { exit(0) }
+                    }
+                    if all || args.contains("--token-audit") {
+                        await TokenAudit.run()
+                        if !all { exit(0) }
+                    }
+                    if all || args.contains("--stance-probe") {
+                        await StanceProbe.run()
+                        if !all { exit(0) }
+                    }
+                    if all || args.contains("--growth-audit") {
+                        await GrowthAudit.run()
+                        if !all { exit(0) }
+                    }
+                    if all || args.contains("--schema-probe") {
+                        await SchemaProbe.run()
+                        if !all { exit(0) }
+                    }
+                    if all || args.contains("--position-probe") {
+                        await SchemaProbe.positionProbe()
+                        if !all { exit(0) }
+                    }
+                    if all || args.contains("--retry-probe") {
+                        await SchemaProbe.retryProbe()
+                        if !all { exit(0) }
+                    }
+                    if all {
+                        print("[RUN-ALL] every harness complete")
+                        fflush(stdout)
+                        exit(0)
+                    }
+                }
         }
     }
 }

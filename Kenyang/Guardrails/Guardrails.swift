@@ -113,7 +113,7 @@ struct StatisticalGuard {
 
 struct LoopBudget {
     var maxRounds: Int = 6
-    var maxModelCallsPerRound: Int = 3
+    var maxModelCallsPerRound: Int = 6
     var wallClockLimit: TimeInterval = 20
     private(set) var roundsUsed = 0
     private(set) var callsThisRound = 0

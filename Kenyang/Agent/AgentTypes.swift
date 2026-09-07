@@ -65,6 +65,7 @@ struct StationReading: Sendable {
 
 enum TraceKind: String, Sendable {
     case hypothesis, intent, toolCall, verdict, decision, guardrail, plan, stop, decline
+    case modelFailure
 }
 
 struct TraceEntry: Identifiable, Sendable {

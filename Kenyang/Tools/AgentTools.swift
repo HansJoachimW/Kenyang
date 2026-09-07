@@ -10,6 +10,7 @@ actor ToolContext {
     private(set) var minutesRemaining: Int?
     private(set) var exclusions: [String] = []
     private(set) var basisRecords: [BasisRecord] = []
+    private(set) var fullnessReadings: [FullnessReading] = []
     private(set) var hypothesisStation: StationCategory = .unknown
     private(set) var invoked: Set<String> = []
 
@@ -19,6 +20,7 @@ actor ToolContext {
               minutesRemaining: Int?,
               exclusions: [String],
               basisRecords: [BasisRecord],
+              fullnessReadings: [FullnessReading],
               hypothesisStation: StationCategory) {
         self.sightings = sightings
         self.events = events
@@ -26,6 +28,7 @@ actor ToolContext {
         self.minutesRemaining = minutesRemaining
         self.exclusions = exclusions
         self.basisRecords = basisRecords
+        self.fullnessReadings = fullnessReadings
         self.hypothesisStation = hypothesisStation
     }
 
@@ -99,14 +102,23 @@ struct EvaluateHypothesisTool: Tool {
 
 struct CheckCapacityModelTool: Tool {
     let name = "checkCapacityModel"
-    let description = "Tests whether the capacity estimate matches the diner's reported fullness. Returns consistent, overestimating, underestimating, or insufficient."
+    let description = "Falsifies the capacity ESTIMATE itself by comparing what the app predicted against the fullness the diner reported. Returns consistent, overestimating, underestimating, or insufficient. Call this when deciding whether the remaining budget can still be trusted — it answers a different question from getRemainingCapacity, which only reports the current number."
 
     @Generable struct Arguments {}
 
     func call(arguments: Arguments) async throws -> String {
         await ToolContext.shared.note(name)
         let capacity = await ToolContext.shared.capacity
-        return "checkCapacityModel = remaining \(String(format: "%.1f", capacity.remaining)) of \(String(format: "%.1f", capacity.maxSatiety)) satiety units (about \(String(format: "%.1f", capacity.plateEstimate)) plates)"
+        let readings = await ToolContext.shared.fullnessReadings
+        guard let latest = readings.sorted(by: { $0.at < $1.at }).last else {
+            return "checkCapacityModel = insufficient (no fullness reading this meal; the budget is an unverified estimate)"
+        }
+        let predicted = CapacityEngine.predictedFullness(
+            CapacityState(maxSatiety: capacity.maxSatiety, spent: latest.cumulativeSatiety))
+        let delta = latest.value - predicted
+        let verdict: CapacityVerdict = delta >= 2 ? .overestimating
+            : delta <= -2 ? .underestimating : .consistent
+        return "checkCapacityModel = \(verdict.rawValue) (predicted fullness \(predicted)/5, diner reported \(latest.value)/5)"
     }
 }
 

@@ -10,6 +10,7 @@ struct AgentInput: Sendable {
     var basisRecords: [BasisRecord]
     var roundIndex: Int
     var currentHypothesis: ValueHypothesis?
+    var fullnessReadings: [FullnessReading] = []
 }
 
 enum AgentOutcome: Sendable {
@@ -74,6 +75,7 @@ final class RoundAgent {
                                       minutesRemaining: input.minutesRemaining,
                                       exclusions: input.exclusions,
                                       basisRecords: input.basisRecords,
+                                      fullnessReadings: input.fullnessReadings,
                                       hypothesisStation: input.currentHypothesis?.station ?? .unknown)
 
         let hypothesis: ValueHypothesis
@@ -111,19 +113,32 @@ final class RoundAgent {
         return .planned(plan, hypothesis, structured)
     }
 
-    private func hypothesise(input: AgentInput) async -> ValueHypothesis? {
+    private func hypothesise(input: AgentInput, excluding dead: StationCategory? = nil) async -> ValueHypothesis? {
         guard budget.consumeCall() else { return nil }
         let session = LanguageModelSession(tools: AgentToolbox.readTools,
                                            instructions: Self.instructions)
         do {
-            var h = try await session.respond(
-                to: """
-                    Round \(input.roundIndex). Use the tools to see the spread, the \
-                    constraints and how much budget is left, then say where the value \
-                    is concentrated and what rating you expect from that station.
-                    """,
-                generating: ValueHypothesis.self
-            ).content
+            let exclusion = dead.map {
+                "\nThe \($0.rawValue) has already been FALSIFIED by the ratings. Do not choose it again — name a different station."
+            } ?? ""
+            var h = try await retrying("hypothesise") {
+                try await session.respond(
+                    to: """
+                        Round \(input.roundIndex). Use the tools to see the spread, the \
+                        constraints and how much budget is left, then say where the value \
+                        is concentrated and what rating you expect from that station.\(exclusion)
+                        """,
+                    generating: ValueHypothesis.self
+                ).content
+            }
+
+            if let dead, h.station == dead {
+                trace.record(kind: .guardrail,
+                             title: "pivot guard",
+                             detail: "Model re-proposed the falsified \(dead.rawValue) — forced to the next best station",
+                             deterministic: true)
+                h = nextBest(after: dead, input: input)
+            }
 
             if !OutputValidator.isSafe(h.claim) {
                 trace.record(kind: .guardrail,
@@ -140,9 +155,9 @@ final class RoundAgent {
                          deterministic: false)
             return h
         } catch {
-            trace.record(kind: .guardrail,
-                         title: "model error",
-                         detail: Self.describe(error),
+            trace.record(kind: .modelFailure,
+                         title: "hypothesise failed",
+                         detail: "\(Self.describe(error)). Falling back to the highest value density computed in Swift.",
                          deterministic: true)
             return nil
         }
@@ -160,14 +175,17 @@ final class RoundAgent {
         let session = LanguageModelSession(tools: AgentToolbox.readTools,
                                            instructions: Self.instructions)
         do {
-            let decision = try await session.respond(
-                to: """
-                    Your hypothesis was: \(hypothesis.claim)
-                    Call evaluateHypothesis for the \(hypothesis.station.rawValue) and \
-                    getRemainingCapacity, then decide.
-                    """,
-                generating: RoundDecision.self
-            ).content
+            let decision = try await retrying("decide") {
+                try await session.respond(
+                    to: """
+                        Your hypothesis was: \(hypothesis.claim)
+                        Call evaluateHypothesis for the \(hypothesis.station.rawValue), \
+                        getRemainingCapacity, and checkCapacityModel to see whether the \
+                        remaining budget can still be trusted. Then decide.
+                        """,
+                    generating: RoundDecision.self
+                ).content
+            }
 
             await recordInvocations()
 
@@ -193,15 +211,24 @@ final class RoundAgent {
                          deterministic: false)
 
             if move == .pivot {
-                return await hypothesise(input: input) ?? fallbackHypothesis(input)
+                return await hypothesise(input: input, excluding: hypothesis.station)
+                    ?? nextBest(after: hypothesis.station, input: input)
             }
             return hypothesis
         } catch {
-            trace.record(kind: .guardrail,
-                         title: "model error",
-                         detail: Self.describe(error),
+            trace.record(kind: .modelFailure,
+                         title: "decide failed",
+                         detail: "\(Self.describe(error)). The model could not explain the move; the tool verdict decides it instead.",
                          deterministic: true)
-            return hypothesis
+
+            guard verdict == .contradicted else { return hypothesis }
+
+            trace.record(kind: .decision,
+                         title: "pivot",
+                         detail: "Forced by evaluateHypothesis = contradicted. The model's explanation failed to decode, so the pivot is taken on the tool's authority alone.",
+                         deterministic: true)
+            return await hypothesise(input: input, excluding: hypothesis.station)
+                ?? nextBest(after: hypothesis.station, input: input)
         }
     }
 
@@ -210,16 +237,18 @@ final class RoundAgent {
         let names = input.sightings.map(\.name).joined(separator: ", ")
         let session = LanguageModelSession(instructions: Self.instructions)
         do {
-            var intent = try await session.respond(
-                to: """
-                    Dishes available: \(names)
-                    Round \(input.roundIndex). Capacity left: about \
-                    \(String(format: "%.1f", input.capacity.plateEstimate)) plates. \
-                    Hypothesis: \(hypothesis.claim)
-                    Set the objective for this round.
-                    """,
-                generating: RoundIntent.self
-            ).content
+            var intent = try await retrying("setIntent") {
+                try await session.respond(
+                    to: """
+                        Dishes available: \(names)
+                        Round \(input.roundIndex). Capacity left: about \
+                        \(String(format: "%.1f", input.capacity.plateEstimate)) plates. \
+                        Hypothesis: \(hypothesis.claim)
+                        Set the objective for this round.
+                        """,
+                    generating: RoundIntent.self
+                ).content
+            }
 
             let known = Set(input.sightings.map { $0.name.lowercased() })
             intent.learnAbout = intent.learnAbout.filter { known.contains($0.lowercased()) }
@@ -232,18 +261,54 @@ final class RoundAgent {
                          deterministic: false)
             return intent
         } catch {
-            trace.record(kind: .guardrail,
-                         title: "model error",
-                         detail: Self.describe(error),
+            trace.record(kind: .modelFailure,
+                         title: "setIntent failed",
+                         detail: "\(Self.describe(error)). Planning under the balanced default objective instead of one the agent chose.",
                          deterministic: true)
             return nil
         }
+    }
+
+    /// One retry on a transient generation failure. TESTS.md §5, 2026-09-04:
+    /// `RoundDecision` fails to decode on roughly one call in five — the model
+    /// writes correct prose instead of JSON. The failures are independent, so a
+    /// single retry takes ~20% to ~4%. `guardrailViolation` is retried on the
+    /// same grounds (TESTS.md T57 — blocks are non-deterministic).
+    private func retrying<T>(_ label: String,
+                             _ body: () async throws -> T) async throws -> T {
+        do {
+            return try await body()
+        } catch {
+            guard Self.isTransient(error), budget.consumeCall() else { throw error }
+            trace.record(kind: .modelFailure,
+                         title: "retry",
+                         detail: "\(label): \(Self.describe(error)) — retrying once",
+                         deterministic: true)
+            return try await body()
+        }
+    }
+
+    private static func isTransient(_ error: Error) -> Bool {
+        let text = "\(error)"
+        return text.contains("decodingFailure") || text.contains("guardrailViolation")
     }
 
     private func deterministicVerdict(_ h: ValueHypothesis, events: [TasteEvent]) -> HypothesisVerdict {
         let p = ValueEngine.stationPosterior(h.station, events: events)
         guard p.sampleCount >= ValueEngine.minimumSamples else { return .insufficient }
         return p.mean >= h.expectedRating.score - 0.25 ? .supported : .contradicted
+    }
+
+    private func nextBest(after dead: StationCategory, input: AgentInput) -> ValueHypothesis {
+        let candidates = input.sightings.filter { $0.station != dead }
+        let best = candidates
+            .map { ($0.station, ValueEngine.valueDensity(for: $0, events: input.events)) }
+            .max { $0.1 < $1.1 }?.0 ?? .grill
+        return ValueHypothesis(claim: "The \(dead.label.lowercased()) is not where the value is — it looks like the \(best.label.lowercased()) instead.",
+                               station: best,
+                               basis: .costDensity,
+                               confidence: .low,
+                               expectedRating: .fine)
     }
 
     private func fallbackHypothesis(_ input: AgentInput) -> ValueHypothesis {

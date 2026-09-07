@@ -18,6 +18,7 @@ struct RootView: View {
 struct SessionView: View {
     @Bindable var model: SessionViewModel
     @State private var showingTrace = false
+    @State private var showingVerification = false
 
     var body: some View {
         NavigationStack {
@@ -36,9 +37,15 @@ struct SessionView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Trace") { showingTrace = true }
                 }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Verify") { showingVerification = true }
+                }
             }
             .sheet(isPresented: $showingTrace) {
                 TraceView(trace: model.trace)
+            }
+            .sheet(isPresented: $showingVerification) {
+                VerificationView()
             }
         }
     }
