@@ -286,25 +286,53 @@ enum TokenAudit {
         // The fallback the pass bar asks for.
         line("")
         line("attempting chunk-by-category (the fallback strategy)…")
-        var parsed = 0
+        var returnedNames: [String] = []
         var chunkFailures = 0
+        var mismatches: [String] = []
+
         for (category, lines) in Fixtures.menuByCategory() {
             let chunkPrompt = Fixtures.menuParsePrompt(lines.joined(separator: "\n"))
             do {
                 let r = try await LanguageModelSession(instructions: Fixtures.menuParseInstructions)
                     .respond(to: chunkPrompt, generating: ParsedMenu.self)
-                parsed += r.content.items.count
-                line(String(format: "  %-22@ %2d in → %2d out",
-                            category as NSString, lines.count, r.content.items.count))
+                let out = r.content.items.map(\.name)
+                returnedNames += out
+                let matched = out.count == lines.count
+                if !matched {
+                    mismatches.append("\(category): \(lines.count) in, \(out.count) out")
+                }
+                line("  \(matched ? " " : "!") \(category.padded(to: 22)) "
+                     + "\(lines.count) in → \(out.count) out")
             } catch {
                 chunkFailures += 1
-                line("  \(category): FAILED — \(describe(error))")
+                line("  ✗ \(category.padded(to: 22)) FAILED — \(describe(error))")
             }
         }
+        let expected = Fixtures.menuByCategory().flatMap(\.1).map(normalised)
+        let returned = returnedNames.map(normalised)
+        let invented = Set(returned).subtracting(expected).sorted()
+        let missed = Set(expected).subtracting(returned).sorted()
+        let duplicated = Dictionary(grouping: returned, by: { $0 })
+            .filter { $0.value.count > 1 }
+            .keys.sorted()
+
         line("")
-        line("  chunked total: \(parsed) of \(Fixtures.menuItemCount) items, "
-             + "\(chunkFailures) category failures")
-        line("  VERDICT: \(chunkFailures == 0 && parsed >= Fixtures.menuItemCount - 5 ? "chunking WORKS — Module A has a proven strategy" : "chunking is NOT yet reliable")")
+        line("  chunked total     : \(returnedNames.count) of \(Fixtures.menuItemCount) items")
+        line("  category failures : \(chunkFailures)")
+        line("  count mismatches  : \(mismatches.count)")
+        for m in mismatches { line("     \(m)") }
+        if !invented.isEmpty {
+            line("  INVENTED — returned but not printed on the menu: \(invented.joined(separator: ", "))")
+        }
+        if !missed.isEmpty {
+            line("  MISSED — printed but not returned: \(missed.joined(separator: ", "))")
+        }
+        if !duplicated.isEmpty {
+            line("  DUPLICATED: \(duplicated.joined(separator: ", "))")
+        }
+
+        let faithful = chunkFailures == 0 && invented.isEmpty && missed.isEmpty && duplicated.isEmpty
+        line("  VERDICT: \(faithful ? "chunking WORKS — every printed item returned exactly once, nothing invented" : "chunking is NOT reliable — see the lines above")")
     }
 
     // MARK: - Output helpers
@@ -385,7 +413,8 @@ enum MenuCategory: String, Codable, CaseIterable, Sendable {
 
 @Generable
 struct MenuItemDraft: Sendable {
-    @Guide(description: "The item name exactly as printed on the menu")
+    @Guide(description: "The item name exactly as printed on the menu",
+           .pattern(/[^\n]{1,80}/))
     var name: String
 
     @Guide(description: "The printed menu category this item appears under")
@@ -408,4 +437,12 @@ private extension String {
     func leftPadded(to width: Int) -> String {
         count >= width ? self : String(repeating: " ", count: width - count) + self
     }
+
+    func padded(to width: Int) -> String {
+        count >= width ? self : self + String(repeating: " ", count: width - count)
+    }
+}
+
+private func normalised(_ name: String) -> String {
+    name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 }

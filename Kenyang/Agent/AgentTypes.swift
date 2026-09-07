@@ -4,7 +4,8 @@ import Observation
 
 @Generable
 struct ValueHypothesis: Sendable {
-    @Guide(description: "Where the value is concentrated at this buffet, in one sentence")
+    @Guide(description: "Where the value is concentrated at this buffet, in one sentence",
+           .pattern(/[^\n]{1,180}/))
     var claim: String
 
     var station: StationCategory
@@ -17,7 +18,8 @@ struct ValueHypothesis: Sendable {
 
 @Generable
 struct RoundIntent: Sendable {
-    @Guide(description: "What this round is for, in one sentence")
+    @Guide(description: "What this round is for, in one sentence",
+           .pattern(/[^\n]{1,180}/))
     var rationale: String
 
     @Guide(description: """
@@ -32,7 +34,9 @@ struct RoundIntent: Sendable {
         """)
     var reconShare: ReconShare
 
-    @Guide(description: "Dish names worth spending capacity to learn about. Choose ONLY from the dishes listed in the message.")
+    @Guide(description: "Dish names worth spending capacity to learn about. Choose ONLY from the dishes listed in the message.",
+           .maximumCount(4),
+           .element(.pattern(/[^\n]{1,60}/)))
     var learnAbout: [String]
 
     @Guide(description: """
@@ -45,7 +49,8 @@ struct RoundIntent: Sendable {
 
 @Generable
 struct RoundDecision: Sendable {
-    @Guide(description: "First, state what the tool results actually say. One sentence.")
+    @Guide(description: "First, state what the tool results actually say. One sentence.",
+           .pattern(/[^\n]{1,200}/))
     var because: String
 
     @Guide(description: """
