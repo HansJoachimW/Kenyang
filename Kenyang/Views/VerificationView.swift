@@ -24,6 +24,7 @@ final class VerificationRunner {
         emit("KENYANG VERIFICATION — \(Date().formatted(date: .omitted, time: .standard))")
         emit("")
 
+        t76_vocabularyMigration()
         t30_exclusionValidator()
         t29_minimumSamples()
         t37_counterfactual()
@@ -37,14 +38,40 @@ final class VerificationRunner {
         running = false
     }
 
+    private func t76_vocabularyMigration() {
+        emit("──── T76 ⭐ vocabulary migration — no stored category decodes to unknown ────")
+        emit("StationCategory → MenuCategory renamed the persisted raw values. Nothing")
+        emit("warns when a raw value stops decoding — it silently becomes .unknown.")
+
+        let audit = store.auditPersistedCategories()
+        emit("stored: \(audit.sightings) sightings, \(audit.events) taste events")
+
+        guard audit.total > 0 else {
+            emit("⚠️ store is empty — nothing to migrate, and nothing proven either")
+            emit("T76: VACUOUS — re-run after a session has been recorded")
+            emit("")
+            return
+        }
+
+        emit("\(audit.undecodable == 0 ? "✅" : "❌") decodable: \(audit.total - audit.undecodable)/\(audit.total)")
+        emit("\(audit.unknown == 0 ? "✅" : "❌") categorised: \(audit.total - audit.unknown)/\(audit.total) — \(audit.unknown) sitting at .unknown")
+
+        if audit.unknown > 0 && audit.undecodable == 0 {
+            emit("⚠️ these decode cleanly and are still wrong. A migration default writes")
+            emit("   .unknown into every existing row, which a decodability check cannot see.")
+        }
+        emit("T76: \(audit.isClean ? "PASS" : "FAIL — \(audit.damaged) of \(audit.total) rows lost their category")")
+        emit("")
+    }
+
     private func t30_exclusionValidator() {
         emit("──── T30 ⭐ exclusion validator, ternary ────")
 
-        let known = DishSighting(name: "Prawn cocktail", station: .rawBar,
+        let known = DishSighting(name: "Prawn cocktail", category: .raw,
                                  ingredientsKnown: true, ingredients: ["prawn", "mayonnaise"])
-        let clean = DishSighting(name: "Green salad", station: .salad,
+        let clean = DishSighting(name: "Green salad", category: .vegetable,
                                  ingredientsKnown: true, ingredients: ["lettuce", "tomato"])
-        let opaque = DishSighting(name: "Nasi Goreng", station: .riceAndNoodles,
+        let opaque = DishSighting(name: "Nasi Goreng", category: .starch,
                                   ingredientsKnown: false)
 
         let exclusions = ["prawn"]
@@ -78,11 +105,11 @@ final class VerificationRunner {
 
     private func t29_minimumSamples() {
         emit("──── T29 statistical guard — no claim at n=1 ────")
-        let one = [TasteEvent(dishName: "Sashimi", station: .rawBar, rating: .good, portion: .normal, roundIndex: 1)]
-        let two = one + [TasteEvent(dishName: "Sashimi", station: .rawBar, rating: .good, portion: .normal, roundIndex: 1)]
+        let one = [TasteEvent(dishName: "Sashimi", category: .raw, rating: .good, portion: .normal, roundIndex: 1)]
+        let two = one + [TasteEvent(dishName: "Sashimi", category: .raw, rating: .good, portion: .normal, roundIndex: 1)]
 
-        let p1 = ValueEngine.posterior(dishName: "Sashimi", station: .rawBar, events: one)
-        let p2 = ValueEngine.posterior(dishName: "Sashimi", station: .rawBar, events: two)
+        let p1 = ValueEngine.posterior(dishName: "Sashimi", category: .raw, events: one)
+        let p2 = ValueEngine.posterior(dishName: "Sashimi", category: .raw, events: two)
 
         emit("\(StatisticalGuard.canClaim(p1) ? "❌" : "✅") n=1 → claim refused")
         emit("\(StatisticalGuard.canClaim(p2) ? "✅" : "❌") n=2 → claim allowed")
@@ -96,8 +123,8 @@ final class VerificationRunner {
         emit("identical, the agent is decorative.")
 
         let spread = DemoSpread.standard.map {
-            DishSighting(name: $0.name, station: $0.station,
-                         isRationed: $0.rationed, isMadeToOrder: $0.madeToOrder)
+            DishSighting(name: $0.name, category: $0.category,
+                         printedCategory: $0.printed, tierRank: $0.tier)
         }
         let capacity = CapacityState(maxSatiety: 9, spent: 0)
 
@@ -128,15 +155,15 @@ final class VerificationRunner {
         }
 
         let spread = DemoSpread.standard.map {
-            DishSighting(name: $0.name, station: $0.station,
-                         isRationed: $0.rationed, isMadeToOrder: $0.madeToOrder)
+            DishSighting(name: $0.name, category: $0.category,
+                         printedCategory: $0.printed, tierRank: $0.tier)
         }
 
         await ToolContext.shared.resetInvocations()
         await ToolContext.shared.load(sightings: spread, events: [],
                                       capacity: CapacityState(maxSatiety: 9, spent: 0),
                                       minutesRemaining: 55, exclusions: ["peanut"],
-                                      basisRecords: [], fullnessReadings: [], hypothesisStation: .rawBar)
+                                      basisRecords: [], fullnessReadings: [], hypothesisCategory: .raw)
 
         let prompts = [
             "List the spread and the constraints, then say where the value is.",
@@ -156,8 +183,8 @@ final class VerificationRunner {
         emit(missing.isEmpty ? "✅ every tool invoked" : "⚠️ never invoked: \(missing.joined(separator: ", "))")
 
         let refusals = [
-            ("evaluateHypothesis", try? await EvaluateHypothesisTool().call(arguments: .init(station: .rawBar, expectedRating: .good))),
-            ("getPosterior",       try? await GetPosteriorTool().call(arguments: .init(station: .grill))),
+            ("evaluateHypothesis", try? await EvaluateHypothesisTool().call(arguments: .init(category: .raw, expectedRating: .good))),
+            ("getPosterior",       try? await GetPosteriorTool().call(arguments: .init(category: .meat))),
             ("getBasisCalibration", try? await GetBasisCalibrationTool().call(arguments: .init()))
         ]
         var refused = 0
@@ -174,24 +201,24 @@ final class VerificationRunner {
     private func t35_hypothesisDeath() async {
         emit("──── T35 ⭐ a hypothesis dying ────")
         let spread = DemoSpread.standard.map {
-            DishSighting(name: $0.name, station: $0.station,
-                         isRationed: $0.rationed, isMadeToOrder: $0.madeToOrder)
+            DishSighting(name: $0.name, category: $0.category,
+                         printedCategory: $0.printed, tierRank: $0.tier)
         }
         let badRawBar = [
-            TasteEvent(dishName: "Sashimi", station: .rawBar, rating: .skip, portion: .taste, roundIndex: 1),
-            TasteEvent(dishName: "Oysters", station: .rawBar, rating: .skip, portion: .taste, roundIndex: 1),
-            TasteEvent(dishName: "Prawns", station: .rawBar, rating: .skip, portion: .taste, roundIndex: 1)
+            TasteEvent(dishName: "Sashimi", category: .raw, rating: .skip, portion: .taste, roundIndex: 1),
+            TasteEvent(dishName: "Oysters", category: .raw, rating: .skip, portion: .taste, roundIndex: 1),
+            TasteEvent(dishName: "Prawns", category: .raw, rating: .skip, portion: .taste, roundIndex: 1)
         ]
         let hypothesis = ValueHypothesis(claim: "The value is concentrated at the raw bar.",
-                                         station: .rawBar, basis: .scarcity,
+                                         category: .raw, basis: .tierExclusivity,
                                          confidence: .high, expectedRating: .good)
 
-        let posterior = ValueEngine.stationPosterior(.rawBar, events: badRawBar)
+        let posterior = ValueEngine.categoryPosterior(.raw, events: badRawBar)
         let verdict: HypothesisVerdict = posterior.sampleCount < ValueEngine.minimumSamples
             ? .insufficient
             : (posterior.mean >= hypothesis.expectedRating.score - 0.25 ? .supported : .contradicted)
 
-        emit("rated the hypothesised station skip×3 → observed \(String(format: "%.2f", posterior.mean)), expected \(String(format: "%.2f", hypothesis.expectedRating.score))")
+        emit("rated the hypothesised category skip×3 → observed \(String(format: "%.2f", posterior.mean)), expected \(String(format: "%.2f", hypothesis.expectedRating.score))")
         emit("\(verdict == .contradicted ? "✅" : "❌") deterministic verdict: \(verdict.rawValue)")
 
         let trace = TraceLog()
@@ -203,8 +230,8 @@ final class VerificationRunner {
         let outcome = await agent.run(input)
 
         if case .planned(_, let newHypothesis, _) = outcome {
-            let pivoted = newHypothesis.station != hypothesis.station
-            emit("\(pivoted ? "✅" : "❌") pivoted: \(hypothesis.station.rawValue) → \(newHypothesis.station.rawValue)")
+            let pivoted = newHypothesis.category != hypothesis.category
+            emit("\(pivoted ? "✅" : "❌") pivoted: \(hypothesis.category.rawValue) → \(newHypothesis.category.rawValue)")
             emit("   new claim: \(newHypothesis.claim)")
         } else {
             emit("outcome: \(outcome)")
@@ -219,11 +246,11 @@ final class VerificationRunner {
     private func t34_pathVariance() async {
         emit("──── T34 ⭐ path variance ────")
         let spread = DemoSpread.standard.map {
-            DishSighting(name: $0.name, station: $0.station,
-                         isRationed: $0.rationed, isMadeToOrder: $0.madeToOrder)
+            DishSighting(name: $0.name, category: $0.category,
+                         printedCategory: $0.printed, tierRank: $0.tier)
         }
         let thin = Array(spread.prefix(6)).map {
-            DishSighting(name: $0.name, station: $0.station)
+            DishSighting(name: $0.name, category: $0.category)
         }
 
         let scenarios: [(String, AgentInput)] = [

@@ -14,15 +14,15 @@ enum Fixtures {
     static func midMealInput() -> AgentInput {
         let sightings = DemoSpread.standard.map {
             DishSighting(name: $0.name,
-                         station: $0.station,
-                         isRationed: $0.rationed,
-                         isMadeToOrder: $0.madeToOrder)
+                         category: $0.category,
+                         printedCategory: $0.printed,
+                         tierRank: $0.tier)
         }
         let events: [TasteEvent] = [
-            TasteEvent(dishName: "Sashimi", station: .rawBar, rating: .fine, portion: .normal, roundIndex: 1),
-            TasteEvent(dishName: "Oysters", station: .rawBar, rating: .skip, portion: .taste, roundIndex: 1),
-            TasteEvent(dishName: "Prawns", station: .rawBar, rating: .fine, portion: .normal, roundIndex: 1),
-            TasteEvent(dishName: "Grilled lamb", station: .grill, rating: .good, portion: .normal, roundIndex: 1)
+            TasteEvent(dishName: "Salmon Nigiri", category: .raw, rating: .fine, portion: .normal, roundIndex: 1),
+            TasteEvent(dishName: "Tuna Nigiri", category: .raw, rating: .skip, portion: .taste, roundIndex: 1),
+            TasteEvent(dishName: "Kaisou Salad", category: .vegetable, rating: .fine, portion: .normal, roundIndex: 1),
+            TasteEvent(dishName: "Gyu-Kaku Karubi", category: .meat, rating: .good, portion: .normal, roundIndex: 1)
         ]
         return AgentInput(sightings: sightings,
                           events: events,
@@ -38,7 +38,7 @@ enum Fixtures {
         """
         Round \(input.roundIndex). Use the tools to see the spread, the \
         constraints and how much budget is left, then say where the value \
-        is concentrated and what rating you expect from that station.
+        is concentrated and what rating you expect from that category.
         """
     }
 
@@ -59,7 +59,7 @@ enum Fixtures {
         Your hypothesis was: The value is concentrated at the raw bar — the \
         sashimi and oysters are rationed, which is the house telling you what \
         it costs them.
-        Call evaluateHypothesis for the rawBar, getRemainingCapacity, and \
+        Call evaluateHypothesis for the raw category, getRemainingCapacity, and \
         checkCapacityModel to see whether the remaining budget can still be \
         trusted. Then decide.
         """

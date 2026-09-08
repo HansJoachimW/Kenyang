@@ -2,47 +2,45 @@ import Foundation
 import FoundationModels
 
 @Generable
-enum StationCategory: String, Codable, CaseIterable, Sendable {
-    case soup, salad, riceAndNoodles, dessert, grill, friedStation, rawBar, unknown
+enum MenuCategory: String, Codable, CaseIterable, Sendable {
+    case starch, fried, soup, dessert, meat, vegetable, raw, unknown
 
     var satietyDensity: Double {
         switch self {
-        case .riceAndNoodles: 1.6
-        case .friedStation:   1.3
-        case .soup:           1.2
-        case .dessert:        1.0
-        case .grill:          0.9
-        case .salad:          0.7
-        case .rawBar:         0.5
-        case .unknown:        1.0
+        case .starch:    1.6
+        case .fried:     1.3
+        case .soup:      1.2
+        case .dessert:   1.0
+        case .unknown:   1.0
+        case .meat:      0.9
+        case .vegetable: 0.6
+        case .raw:       0.5
         }
     }
 
     var priorValue: Double {
         switch self {
-        case .rawBar:         0.90
-        case .grill:          0.75
-        case .salad:          0.45
-        case .soup:           0.40
-        case .dessert:        0.40
-        case .friedStation:   0.35
-        case .riceAndNoodles: 0.20
-        case .unknown:        0.50
+        case .meat:      0.80
+        case .raw:       0.75
+        case .unknown:   0.50
+        case .vegetable: 0.45
+        case .soup:      0.40
+        case .dessert:   0.40
+        case .fried:     0.35
+        case .starch:    0.20
         }
     }
 
-    var isTerminal: Bool { self == .dessert }
-
     var label: String {
         switch self {
-        case .rawBar:         "Raw bar"
-        case .grill:          "Grill"
-        case .friedStation:   "Fried"
-        case .riceAndNoodles: "Rice & noodles"
-        case .soup:           "Soup"
-        case .salad:          "Salad"
-        case .dessert:        "Dessert"
-        case .unknown:        "Unknown"
+        case .starch:    "Rice & noodles"
+        case .fried:     "Fried"
+        case .soup:      "Soup & broth"
+        case .dessert:   "Dessert"
+        case .meat:      "Meat"
+        case .vegetable: "Vegetables"
+        case .raw:       "Raw & sashimi"
+        case .unknown:   "Unknown"
         }
     }
 }
@@ -75,7 +73,7 @@ enum PortionBucket: String, Codable, CaseIterable, Sendable {
 
 @Generable
 enum ValueBasis: String, Codable, CaseIterable, Sendable {
-    case scarcity, costDensity, preparation, preference
+    case tierExclusivity, costDensity, preparation, preference
 }
 
 @Generable
@@ -151,16 +149,16 @@ struct FlavourProfile: Codable, Hashable, Sendable {
         return min(1.0, axisPart * 0.8 + tempPart)
     }
 
-    static func prior(for station: StationCategory) -> FlavourProfile {
-        switch station {
-        case .rawBar:         FlavourProfile(axes: [.fresh], temperatureHot: false)
-        case .grill:          FlavourProfile(axes: [.rich, .savoury], temperatureHot: true)
-        case .friedStation:   FlavourProfile(axes: [.fried, .savoury], temperatureHot: true)
-        case .riceAndNoodles: FlavourProfile(axes: [.savoury], temperatureHot: true)
-        case .soup:           FlavourProfile(axes: [.savoury], temperatureHot: true)
-        case .salad:          FlavourProfile(axes: [.fresh], temperatureHot: false)
-        case .dessert:        FlavourProfile(axes: [.sweet], temperatureHot: false)
-        case .unknown:        .neutral
+    static func prior(for category: MenuCategory) -> FlavourProfile {
+        switch category {
+        case .meat:      FlavourProfile(axes: [.rich, .savoury], temperatureHot: true)
+        case .fried:     FlavourProfile(axes: [.fried, .savoury], temperatureHot: true)
+        case .starch:    FlavourProfile(axes: [.savoury], temperatureHot: true)
+        case .soup:      FlavourProfile(axes: [.savoury], temperatureHot: true)
+        case .vegetable: FlavourProfile(axes: [.fresh], temperatureHot: false)
+        case .raw:       FlavourProfile(axes: [.fresh], temperatureHot: false)
+        case .dessert:   FlavourProfile(axes: [.sweet], temperatureHot: false)
+        case .unknown:   .neutral
         }
     }
 }

@@ -7,11 +7,11 @@ struct ValueHypothesis: Sendable {
     @Guide(description: "Where the value is concentrated at this buffet, in one sentence")
     var claim: String
 
-    var station: StationCategory
+    var category: MenuCategory
     var basis: ValueBasis
     var confidence: ConfidenceBand
 
-    @Guide(description: "The rating you expect from that station, committed before tasting")
+    @Guide(description: "The rating you expect from that category, committed before tasting")
     var expectedRating: Rating
 }
 
@@ -51,16 +51,16 @@ struct RoundDecision: Sendable {
 
     @Guide(description: """
         Now choose, consistent with what you just wrote: \
-        pivot — the tools say the hypothesis is CONTRADICTED; the value is at a different station. \
+        pivot — the tools say the hypothesis is CONTRADICTED; the value is at a different category. \
         exploit — the tools say the hypothesis is SUPPORTED; spend the remaining capacity on those winners.
         """)
     var move: RoundMove
 }
 
 @Generable
-struct StationReading: Sendable {
-    @Guide(description: "The station this dish belongs to, or unknown if the name does not make it clear")
-    var station: StationCategory
+struct CategoryReading: Sendable {
+    @Guide(description: "The menu category this item belongs to, or unknown if the name does not make it clear")
+    var category: MenuCategory
     var confidence: ConfidenceBand
 }
 

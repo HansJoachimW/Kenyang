@@ -98,11 +98,12 @@ struct TriageGuard {
 
     static func shouldDecline(sightings: [DishSighting]) -> Bool {
         guard sightings.count < minimumDishes else { return false }
-        let hasSignal = sightings.contains { $0.isRationed || $0.isMadeToOrder }
-        return !hasSignal
+        let hasTierSpread = Set(sightings.map(\.tierRank)).count > 1
+        let hasCategorySpread = Set(sightings.map(\.category)).count > 2
+        return !hasTierSpread && !hasCategorySpread
     }
 
-    static let declineMessage = "There isn't a decision problem here worth your attention — few dishes, nothing rationed, nothing to sequence. Just eat what looks good."
+    static let declineMessage = "There isn't a decision problem here worth your attention — few items, one price tier, nothing to sequence. Just order what looks good."
 }
 
 struct StatisticalGuard {

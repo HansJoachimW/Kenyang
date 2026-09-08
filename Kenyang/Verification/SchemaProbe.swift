@@ -311,7 +311,7 @@ struct DecisionB: Sendable {
     @Guide(description: """
         The move implied by those tool results. \
         pivot — the tools say the hypothesis is contradicted; the value is at a \
-        different station. \
+        different category. \
         exploit — the tools say the hypothesis is supported; spend remaining \
         capacity on those winners.
         """)

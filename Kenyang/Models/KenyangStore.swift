@@ -77,6 +77,31 @@ final class KenyangStore {
         return restaurant.visits.flatMap(\.tasteEvents)
     }
 
+    struct VocabularyAudit: Sendable {
+        var sightings = 0
+        var events = 0
+        var undecodable = 0
+        var unknown = 0
+
+        var total: Int { sightings + events }
+        var damaged: Int { undecodable + unknown }
+        var isClean: Bool { damaged == 0 }
+        var unknownFraction: Double { total > 0 ? Double(unknown) / Double(total) : 0 }
+    }
+
+    func auditPersistedCategories() -> VocabularyAudit {
+        var audit = VocabularyAudit()
+        let sightings = (try? context.fetch(FetchDescriptor<DishSighting>())) ?? []
+        let events = (try? context.fetch(FetchDescriptor<TasteEvent>())) ?? []
+        audit.sightings = sightings.count
+        audit.events = events.count
+
+        let raws = sightings.map(\.categoryRaw) + events.map(\.categoryRaw)
+        audit.undecodable = raws.filter { MenuCategory(rawValue: $0) == nil }.count
+        audit.unknown = raws.filter { MenuCategory(rawValue: $0) == .unknown }.count
+        return audit
+    }
+
     func allDishNames() -> [String] {
         let descriptor = FetchDescriptor<DishSighting>()
         let sightings = (try? context.fetch(descriptor)) ?? []
@@ -103,13 +128,13 @@ final class KenyangStore {
         return visit
     }
 
-    func addSightings(_ specs: [(name: String, station: StationCategory, rationed: Bool, madeToOrder: Bool)],
+    func addSightings(_ specs: [(name: String, category: MenuCategory, printed: String, tier: Int)],
                       to visit: Visit) {
         for spec in specs {
             let sighting = DishSighting(name: spec.name,
-                                        station: spec.station,
-                                        isRationed: spec.rationed,
-                                        isMadeToOrder: spec.madeToOrder)
+                                        category: spec.category,
+                                        printedCategory: spec.printed,
+                                        tierRank: spec.tier)
             sighting.visit = visit
             context.insert(sighting)
         }
@@ -118,13 +143,13 @@ final class KenyangStore {
 
     @discardableResult
     func rate(dishName: String,
-              station: StationCategory,
+              category: MenuCategory,
               rating: Rating,
               portion: PortionBucket,
               in visit: Visit,
               roundIndex: Int) -> TasteEvent {
         let event = TasteEvent(dishName: dishName,
-                               station: station,
+                               category: category,
                                rating: rating,
                                portion: portion,
                                roundIndex: roundIndex)

@@ -7,12 +7,12 @@ struct DishEntity: AppEntity, IndexedEntity {
 
     var id: String
     var name: String
-    var station: StationCategory
+    var category: MenuCategory
     var restaurantName: String?
 
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(title: "\(name)",
-                              subtitle: "\(station.label)\(restaurantName.map { " · \($0)" } ?? "")")
+                              subtitle: "\(category.label)\(restaurantName.map { " · \($0)" } ?? "")")
     }
 }
 
@@ -40,7 +40,7 @@ struct DishEntityQuery: EntityStringQuery {
     static func entity(_ sighting: DishSighting) -> DishEntity {
         DishEntity(id: sighting.name,
                    name: sighting.name,
-                   station: sighting.station,
+                   category: sighting.category,
                    restaurantName: sighting.visit?.restaurant?.name)
     }
 }
@@ -100,11 +100,11 @@ extension PortionBucket: AppEnum {
     }
 }
 
-extension StationCategory: AppEnum {
-    nonisolated static var typeDisplayRepresentation: TypeDisplayRepresentation { "Station" }
-    nonisolated static var caseDisplayRepresentations: [StationCategory: DisplayRepresentation] {
-        [.soup: "Soup", .salad: "Salad", .riceAndNoodles: "Rice & noodles",
-         .dessert: "Dessert", .grill: "Grill", .friedStation: "Fried",
-         .rawBar: "Raw bar", .unknown: "Unknown"]
+extension MenuCategory: AppEnum {
+    nonisolated static var typeDisplayRepresentation: TypeDisplayRepresentation { "Category" }
+    nonisolated static var caseDisplayRepresentations: [MenuCategory: DisplayRepresentation] {
+        [.starch: "Rice & noodles", .fried: "Fried", .soup: "Soup & broth",
+         .dessert: "Dessert", .meat: "Meat", .vegetable: "Vegetables",
+         .raw: "Raw & sashimi", .unknown: "Unknown"]
     }
 }

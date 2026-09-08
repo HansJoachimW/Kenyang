@@ -30,7 +30,7 @@ struct RateDishIntent: AppIntent {
             return .result(dialog: "No meal in progress. Start a session first.")
         }
         store.rate(dishName: dish.name,
-                   station: dish.station,
+                   category: dish.category,
                    rating: rating,
                    portion: portion,
                    in: visit,

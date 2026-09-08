@@ -11,7 +11,7 @@ actor ToolContext {
     private(set) var exclusions: [String] = []
     private(set) var basisRecords: [BasisRecord] = []
     private(set) var fullnessReadings: [FullnessReading] = []
-    private(set) var hypothesisStation: StationCategory = .unknown
+    private(set) var hypothesisCategory: MenuCategory = .unknown
     private(set) var invoked: Set<String> = []
 
     func load(sightings: [DishSighting],
@@ -21,7 +21,7 @@ actor ToolContext {
               exclusions: [String],
               basisRecords: [BasisRecord],
               fullnessReadings: [FullnessReading],
-              hypothesisStation: StationCategory) {
+              hypothesisCategory: MenuCategory) {
         self.sightings = sightings
         self.events = events
         self.capacity = capacity
@@ -29,7 +29,7 @@ actor ToolContext {
         self.exclusions = exclusions
         self.basisRecords = basisRecords
         self.fullnessReadings = fullnessReadings
-        self.hypothesisStation = hypothesisStation
+        self.hypothesisCategory = hypothesisCategory
     }
 
     func resetInvocations() { invoked = [] }
@@ -39,7 +39,7 @@ actor ToolContext {
 
 struct GetSpreadTool: Tool {
     let name = "getSpread"
-    let description = "Lists the dishes available at this buffet with their station and whether the house is rationing them."
+    let description = "Lists the items on the menu with their category, the section they are printed under, and their price tier."
 
     @Generable struct Arguments {}
 
@@ -48,9 +48,9 @@ struct GetSpreadTool: Tool {
         let sightings = await ToolContext.shared.sightings
         guard !sightings.isEmpty else { return "no dishes recorded" }
         return sightings.map { s in
-            var line = "\(s.name) [\(s.station.rawValue)]"
-            if s.isRationed { line += " RATIONED" }
-            if s.isMadeToOrder { line += " made-to-order" }
+            var line = "\(s.name) [\(s.category.rawValue)]"
+            if s.tierRank > 0 { line += " TIER \(s.tierRank + 1)" }
+            if !s.printedCategory.isEmpty { line += " (\(s.printedCategory))" }
             return line
         }.joined(separator: "; ")
     }
@@ -58,21 +58,21 @@ struct GetSpreadTool: Tool {
 
 struct GetPosteriorTool: Tool {
     let name = "getPosterior"
-    let description = "Returns the current value estimate for one station, with its sample count. Low sample counts must not be treated as reliable."
+    let description = "Returns the current value estimate for one menu category, with its sample count. Low sample counts must not be treated as reliable."
 
     @Generable struct Arguments {
-        @Guide(description: "The station to look up")
-        var station: StationCategory
+        @Guide(description: "The menu category to look up")
+        var category: MenuCategory
     }
 
     func call(arguments: Arguments) async throws -> String {
         await ToolContext.shared.note(name)
         let events = await ToolContext.shared.events
-        let p = ValueEngine.stationPosterior(arguments.station, events: events)
+        let p = ValueEngine.categoryPosterior(arguments.category, events: events)
         guard StatisticalGuard.canClaim(p) else {
-            return "\(arguments.station.rawValue): insufficient data (n=\(p.sampleCount))"
+            return "\(arguments.category.rawValue): insufficient data (n=\(p.sampleCount))"
         }
-        return "\(arguments.station.rawValue): mean=\(String(format: "%.2f", p.mean)) n=\(p.sampleCount)"
+        return "\(arguments.category.rawValue): mean=\(String(format: "%.2f", p.mean)) n=\(p.sampleCount)"
     }
 }
 
@@ -81,22 +81,22 @@ struct EvaluateHypothesisTool: Tool {
     let description = "Tests the current value hypothesis against the ratings recorded so far. Returns supported, contradicted, or insufficient. This is the only authority on whether the hypothesis holds — never judge it yourself."
 
     @Generable struct Arguments {
-        @Guide(description: "The station the hypothesis claims the value is concentrated in")
-        var station: StationCategory
-        @Guide(description: "The rating that was expected from that station")
+        @Guide(description: "The menu category the hypothesis claims the value is concentrated in")
+        var category: MenuCategory
+        @Guide(description: "The rating that was expected from that category")
         var expectedRating: Rating
     }
 
     func call(arguments: Arguments) async throws -> String {
         await ToolContext.shared.note(name)
         let events = await ToolContext.shared.events
-        let p = ValueEngine.stationPosterior(arguments.station, events: events)
+        let p = ValueEngine.categoryPosterior(arguments.category, events: events)
         guard p.sampleCount >= ValueEngine.minimumSamples else {
-            return "evaluateHypothesis(\(arguments.station.rawValue)) = insufficient (n=\(p.sampleCount))"
+            return "evaluateHypothesis(\(arguments.category.rawValue)) = insufficient (n=\(p.sampleCount))"
         }
         let expected = arguments.expectedRating.score
         let verdict: HypothesisVerdict = p.mean >= expected - 0.25 ? .supported : .contradicted
-        return "evaluateHypothesis(\(arguments.station.rawValue)) = \(verdict.rawValue) (observed \(String(format: "%.2f", p.mean)) vs expected \(String(format: "%.2f", expected)), n=\(p.sampleCount))"
+        return "evaluateHypothesis(\(arguments.category.rawValue)) = \(verdict.rawValue) (observed \(String(format: "%.2f", p.mean)) vs expected \(String(format: "%.2f", expected)), n=\(p.sampleCount))"
     }
 }
 
@@ -183,10 +183,10 @@ struct GetVisitHistoryTool: Tool {
         await ToolContext.shared.note(name)
         let events = await ToolContext.shared.events
         guard !events.isEmpty else { return "no previous visits recorded" }
-        let byStation = Dictionary(grouping: events, by: \.station)
-        return byStation.map { station, rows in
+        let byCategory = Dictionary(grouping: events, by: \.category)
+        return byCategory.map { category, rows in
             let mean = rows.reduce(0.0) { $0 + $1.rating.score } / Double(rows.count)
-            return "\(station.rawValue): \(String(format: "%.2f", mean)) over \(rows.count)"
+            return "\(category.rawValue): \(String(format: "%.2f", mean)) over \(rows.count)"
         }.joined(separator: "; ")
     }
 }

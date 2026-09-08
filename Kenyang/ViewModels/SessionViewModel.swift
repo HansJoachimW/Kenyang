@@ -58,7 +58,7 @@ final class SessionViewModel {
                       pricePerHead: Double,
                       seatingLimit: Int?,
                       plates: Double,
-                      spread: [(name: String, station: StationCategory, rationed: Bool, madeToOrder: Bool)]) {
+                      spread: [(name: String, category: MenuCategory, printed: String, tier: Int)]) {
         let visit = store.startVisit(restaurantName: restaurantName,
                                      pricePerHead: pricePerHead,
                                      seatingLimitMinutes: seatingLimit,
@@ -111,13 +111,13 @@ final class SessionViewModel {
 
     func rate(_ item: PlannedItem, rating: Rating) {
         guard let visit else { return }
-        if let hypothesis, item.station == hypothesis.station {
+        if let hypothesis, item.category == hypothesis.category {
             store.recordBasisOutcome(basis: hypothesis.basis,
                                      expected: hypothesis.expectedRating,
                                      actual: rating)
         }
         store.rate(dishName: item.dishName,
-                   station: item.station,
+                   category: item.category,
                    rating: rating,
                    portion: item.portion,
                    in: visit,
@@ -130,9 +130,9 @@ final class SessionViewModel {
 
     func rate(dishNamed name: String, rating: Rating, portion: PortionBucket = .normal) {
         guard let visit else { return }
-        let station = visit.sightings.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.station ?? .unknown
+        let category = visit.sightings.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.category ?? .unknown
         store.rate(dishName: name,
-                   station: station,
+                   category: category,
                    rating: rating,
                    portion: portion,
                    in: visit,

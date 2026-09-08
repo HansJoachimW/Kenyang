@@ -5,15 +5,23 @@ import SwiftData
 final class Restaurant {
     #Index<Restaurant>([\.name])
     @Attribute(.unique) var name: String
-    var pricePerHead: Double
-    var createdAt: Date
+    var pricePerHead: Double = 0
+    var tierNames: [String] = []
+    var createdAt: Date = Date.now
     @Relationship(deleteRule: .cascade, inverse: \Visit.restaurant) var visits: [Visit]
 
-    init(name: String, pricePerHead: Double = 0) {
+    init(name: String, pricePerHead: Double = 0, tierNames: [String] = []) {
         self.name = name
         self.pricePerHead = pricePerHead
+        self.tierNames = tierNames
         self.createdAt = .now
         self.visits = []
+    }
+
+    var hasTierLadder: Bool { tierNames.count > 1 }
+
+    func tierName(rank: Int) -> String {
+        tierNames.indices.contains(rank) ? tierNames[rank] : "Tier \(rank + 1)"
     }
 }
 
@@ -67,66 +75,69 @@ final class Visit {
 final class DishSighting {
     #Index<DishSighting>([\.name])
     var name: String
-    var stationRaw: String
-    var isRationed: Bool
-    var isMadeToOrder: Bool
-    var queueMinutes: Int
-    var ingredientsKnown: Bool
-    var ingredients: [String]
+    var categoryRaw: String = MenuCategory.unknown.rawValue
+    var printedCategory: String = ""
+    var tierRank: Int = 0
+    var isTerminal: Bool = false
+    var queueMinutes: Int = 0
+    var ingredientsKnown: Bool = false
+    var ingredients: [String] = []
     var visit: Visit?
 
     init(name: String,
-         station: StationCategory,
-         isRationed: Bool = false,
-         isMadeToOrder: Bool = false,
+         category: MenuCategory,
+         printedCategory: String = "",
+         tierRank: Int = 0,
+         isTerminal: Bool? = nil,
          queueMinutes: Int = 0,
          ingredientsKnown: Bool = false,
          ingredients: [String] = []) {
         self.name = name
-        self.stationRaw = station.rawValue
-        self.isRationed = isRationed
-        self.isMadeToOrder = isMadeToOrder
+        self.categoryRaw = category.rawValue
+        self.printedCategory = printedCategory
+        self.tierRank = tierRank
+        self.isTerminal = isTerminal ?? (category == .dessert)
         self.queueMinutes = queueMinutes
         self.ingredientsKnown = ingredientsKnown
         self.ingredients = ingredients
     }
 
-    var station: StationCategory {
-        get { StationCategory(rawValue: stationRaw) ?? .unknown }
-        set { stationRaw = newValue.rawValue }
+    var category: MenuCategory {
+        get { MenuCategory(rawValue: categoryRaw) ?? .unknown }
+        set { categoryRaw = newValue.rawValue }
     }
 
-    var flavour: FlavourProfile { .prior(for: station) }
+    var flavour: FlavourProfile { .prior(for: category) }
 }
 
 @Model
 final class TasteEvent {
     var at: Date
-    var dishName: String
-    var stationRaw: String
+    var dishName: String = ""
+    var categoryRaw: String = MenuCategory.unknown.rawValue
     var ratingRaw: String
     var portionRaw: String
     var roundIndex: Int
     var visit: Visit?
 
     init(dishName: String,
-         station: StationCategory,
+         category: MenuCategory,
          rating: Rating,
          portion: PortionBucket,
          roundIndex: Int) {
         self.at = .now
         self.dishName = dishName
-        self.stationRaw = station.rawValue
+        self.categoryRaw = category.rawValue
         self.ratingRaw = rating.rawValue
         self.portionRaw = portion.rawValue
         self.roundIndex = roundIndex
     }
 
-    var station: StationCategory { StationCategory(rawValue: stationRaw) ?? .unknown }
+    var category: MenuCategory { MenuCategory(rawValue: categoryRaw) ?? .unknown }
     var rating: Rating { Rating(rawValue: ratingRaw) ?? .fine }
     var portion: PortionBucket { PortionBucket(rawValue: portionRaw) ?? .normal }
 
-    var satietyCost: Double { portion.multiplier * station.satietyDensity }
+    var satietyCost: Double { portion.multiplier * category.satietyDensity }
 }
 
 @Model

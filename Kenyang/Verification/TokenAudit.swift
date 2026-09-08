@@ -406,12 +406,6 @@ enum TokenAudit {
 // MARK: - Menu parse types (Module A is not built; these are the minimum to size it)
 
 @Generable
-enum MenuCategory: String, Codable, CaseIterable, Sendable {
-    case appetizerAgemono, grillAppetizer, standardMeat, premiumMeat
-    case salad, sushi, riceAndNoodle, soup, vegetables, dessert
-}
-
-@Generable
 struct MenuItemDraft: Sendable {
     @Guide(description: "The item name exactly as printed on the menu")
     var name: String

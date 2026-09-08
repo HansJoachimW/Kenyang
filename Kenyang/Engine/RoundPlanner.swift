@@ -3,7 +3,7 @@ import Foundation
 struct PlannedItem: Identifiable, Sendable {
     let id = UUID()
     let dishName: String
-    let station: StationCategory
+    let category: MenuCategory
     let portion: PortionBucket
     let isRecon: Bool
     let satietyCost: Double
@@ -61,12 +61,12 @@ struct RoundPlanner {
 
         func score(_ sighting: DishSighting, alreadyChosen: [DishSighting]) -> Double {
             let posterior = ValueEngine.posterior(dishName: sighting.name,
-                                                  station: sighting.station,
+                                                  category: sighting.category,
                                                   events: events)
             var value = SatietyDiscount.discountedValue(for: sighting, events: events)
 
             let simulated = events + alreadyChosen.map {
-                TasteEvent(dishName: $0.name, station: $0.station,
+                TasteEvent(dishName: $0.name, category: $0.category,
                            rating: .fine, portion: .normal, roundIndex: 0)
             }
             value *= SatietyDiscount.discount(for: sighting, history: simulated)
@@ -75,8 +75,8 @@ struct RoundPlanner {
 
             value += posterior.uncertainty * recon * 0.8
 
-            let stationsChosen = Set(alreadyChosen.map(\.station))
-            let coverage = stationsChosen.contains(sighting.station) ? -1.0 : 1.0
+            let categoriesChosen = Set(alreadyChosen.map(\.category))
+            let coverage = categoriesChosen.contains(sighting.category) ? -1.0 : 1.0
             value += coverage * recon * 0.9
 
             value += (1 - recon) * posterior.mean * 0.7
@@ -86,7 +86,7 @@ struct RoundPlanner {
                 value -= 0.6
             }
             value += posterior.uncertainty * objective.posture.uncertaintyWeight * 0.4
-            if sighting.station.isTerminal && capacity.fractionRemaining > 0.35 {
+            if sighting.isTerminal && capacity.fractionRemaining > 0.35 {
                 value -= 0.7
             }
             if sighting.queueMinutes > 0 {
@@ -133,15 +133,15 @@ struct RoundPlanner {
 
         let items = ordered.enumerated().map { index, sighting -> PlannedItem in
             let posterior = ValueEngine.posterior(dishName: sighting.name,
-                                                  station: sighting.station,
+                                                  category: sighting.category,
                                                   events: events)
             let isRecon = index < reconTarget || posterior.sampleCount == 0
             let portion: PortionBucket = isRecon ? .taste : .normal
             return PlannedItem(dishName: sighting.name,
-                               station: sighting.station,
+                               category: sighting.category,
                                portion: portion,
                                isRecon: isRecon,
-                               satietyCost: portion.multiplier * sighting.station.satietyDensity)
+                               satietyCost: portion.multiplier * sighting.category.satietyDensity)
         }
 
         return RoundPlan(items: items,
@@ -159,7 +159,7 @@ struct RoundPlanner {
                     lhs.flavour.similarity(to: last.flavour) < rhs.flavour.similarity(to: last.flavour)
                 }
             } else {
-                remaining.sort { $0.station.isTerminal == false && $1.station.isTerminal }
+                remaining.sort { !$0.isTerminal && $1.isTerminal }
             }
             ordered.append(remaining.removeFirst())
         }

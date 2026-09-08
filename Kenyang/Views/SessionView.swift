@@ -111,7 +111,7 @@ struct PlanView: View {
                     HStack {
                         VStack(alignment: .leading) {
                             Text(item.dishName)
-                            Text("\(item.station.label) · \(item.portion.rawValue)")
+                            Text("\(item.category.label) · \(item.portion.rawValue)")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -215,19 +215,23 @@ struct TraceView: View {
 }
 
 enum DemoSpread {
-    static let standard: [(name: String, station: StationCategory, rationed: Bool, madeToOrder: Bool)] = [
-        ("Sashimi", .rawBar, true, false),
-        ("Oysters", .rawBar, true, false),
-        ("Prawns", .rawBar, false, false),
-        ("Grilled lamb", .grill, false, true),
-        ("Roast beef", .grill, false, true),
-        ("Fried chicken", .friedStation, false, false),
-        ("Spring rolls", .friedStation, false, false),
-        ("Fried rice", .riceAndNoodles, false, false),
-        ("Egg noodles", .riceAndNoodles, false, false),
-        ("Clear soup", .soup, false, false),
-        ("Green salad", .salad, false, false),
-        ("Chocolate cake", .dessert, false, false),
-        ("Ice cream", .dessert, false, false)
+    static let tierNames = ["Standard", "Premium"]
+
+    static let standard: [(name: String, category: MenuCategory, printed: String, tier: Int)] = [
+        ("Wagyu Karubi", .meat, "PREMIUM MEAT", 1),
+        ("Prime Rib Eye", .meat, "PREMIUM MEAT", 1),
+        ("Gyu-Kaku Karubi", .meat, "STANDARD MEAT", 0),
+        ("Beef Harami", .meat, "STANDARD MEAT", 0),
+        ("Pork Belly Shio", .meat, "STANDARD MEAT", 0),
+        ("Salmon Nigiri", .raw, "SUSHI", 0),
+        ("Tuna Nigiri", .raw, "SUSHI", 0),
+        ("Chicken Karaage", .fried, "APPETIZER & AGEMONO", 0),
+        ("Ebi Fry", .fried, "APPETIZER & AGEMONO", 0),
+        ("Garlic Rice", .starch, "RICE & NOODLE", 0),
+        ("Yaki Udon", .starch, "RICE & NOODLE", 0),
+        ("Miso Soup", .soup, "SOUP", 0),
+        ("Kaisou Salad", .vegetable, "SALAD", 0),
+        ("Grilled Corn", .vegetable, "GRILL APPETIZER", 0),
+        ("Matcha Ice Cream", .dessert, "DESSERT", 0)
     ]
 }
