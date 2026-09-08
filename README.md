@@ -198,10 +198,14 @@ Dates matter here; every figure below is from a logged run, not an estimate.
 | A hypothesis dying, then pivoting | ✅ `rawBar → grill` |
 | Path variance | 3 distinct terminals over 4 runs |
 | Cold start at n = 0 | ✅ |
-| Context, worst call site | **42% of the 4,096 window** against a 3,000 pass bar |
-| `RoundDecision` guided-generation decode | 75–86% first attempt → **0–8% effective** after retry |
+| Context, worst call site | **49% of the 4,096 window** against a 3,000 pass bar |
+| `RoundDecision` guided-generation decode | 72–86% first attempt → **0–8% effective** after retry |
+| Round latency, physical iPhone 17 | **~8.4 s** first round, **~3.4 s** after |
+| Menu parse, 95 items | **95/95 in one call** (19.1 s); chunked 95/95, nothing invented |
 
-### Context is not the constraint — on the input side
+All figures are from a physical iPhone 17 running iOS 26.5 unless stated. Earlier runs used the Simulator, which turned out to be **~3× slower** than the device — see below.
+
+### Context is not the constraint — on either side
 
 Every figure comes from `SystemLanguageModel.tokenCount(for:)`, not a `characters / 4` estimate.
 
@@ -210,13 +214,17 @@ Two consequences that shape the codebase:
 1. **Tool definitions cost ~97 tokens each — 774 for the current eight.** That is the largest single line item in the window, paid on every tool-carrying call. Price a tool in tokens before adding it.
 2. **Tool results are cheap** — 11–28 tokens each. The preamble is 86% of a `decide` transcript. The constant dominates, not accumulation.
 
-### The output side is not settled
+### The output side, and a guide that compiles but does not work
 
-`setIntent` threw `.exceededContextWindowSize` **from a 539-token start** (2026-09-07). `RoundIntent.rationale` is a free `String` with no length `@Guide`, so the model generated until the window ended and killed the session. Not an input problem. **Cap every free-text `@Generable` field.**
+`setIntent` once threw `.exceededContextWindowSize` **from a 539-token start**. `RoundIntent.rationale` is a free `String`, so the model generated until the window ended and killed the session — not an input problem.
+
+The obvious fix is the wrong one. `GenerationGuide<String>` offers exactly three members — `.constant`, `.anyOf`, `.pattern` — so a bounded regex looks like the only structural cap. **It compiles, and the device rejects it at runtime** with `unsupportedGuide`, breaking *every* model call: measured at 0/12 on the patterned type while two unpatterned types in the same process scored 9/12 and 8/12.
+
+Output is instead bounded by **`GenerationOptions(maximumResponseTokens:)`**, per call site. The general lesson: *a guide that type-checks is not a guide the model honours*, and only a run on real hardware tells you which is which.
 
 ### `RoundDecision` fails guided generation, and why the fix is a retry
 
-The model emits correct reasoning as prose instead of JSON. Two candidate causes were tested and **both rejected** — rewriting the `@Guide` text declaratively made it *worse* (12/12 → 6/12), and failure did not accumulate with session state (91% → 75% → 83%, flat). So the fix is `retrying(_:)`, one retry on `decodingFailure` or `guardrailViolation`, consuming loop budget so it cannot run away.
+The model emits correct reasoning as prose instead of JSON. One candidate cause was rejected — failure does not accumulate with session state (flat across four runs, most recently 75 → 75 → 83%). The other, that the `@Guide` wording invites prose, **turned out to be untestable at the available n**: across four runs of twelve calls each, every variant has been both best and worst, and within-variant spread is as wide as between-variant spread. So the fix is `retrying(_:)`, one retry on a transient failure, consuming loop budget so it cannot run away.
 
 It mattered more than the rate suggested: `decide()` caught the error and returned the **unchanged hypothesis**, so one decision step in five silently became *"carry on"* — indistinguishable from `exploit`. A decode failure now degrades to the deterministic tool verdict instead, attributed in the trace as taken on the tool's authority alone, and recorded as `TraceKind.modelFailure` rather than `.guardrail`. **A guardrail firing is the system working; a decode failure is not, and the trace must not conflate them.**
 
@@ -234,16 +242,16 @@ Session start · spread capture · tool-calling agent · hypothesis with pre-reg
 
 ### Known defects, ranked
 
-1. **Unbounded `@Generable` output can kill the session** — no length `@Guide` on free-text fields; `.exceededContextWindowSize` is not handled in `retrying(_:)`.
-2. **`RoundDecision` decode failure** — 8% residual after retry, degrading to the tool verdict.
-3. **The chunked menu parse invents items** — 96 returned from 95. The harness reported zero failures because it checked that chunks parsed, not that counts matched.
-4. **The domain vocabulary predates the adopted scope** — `StationCategory`, `isRationed`, `isMadeToOrder`, `ValueBasis.scarcity` were replaced by printed-menu categories and `tierExclusivity` in the design and not yet in code.
-5. **Latency** — `hypothesise` 18.8–30.1 s; a round 25–36 s against a ~3 s budget, and that is a Simulator floor.
-6. **`LoopBudget.wallClockLimit` is declared and never read** — layer 7 enforces call count only, and one `hypothesise` can eat the whole 20 s budget.
-7. **`CapacityEngine.fittedMax` fits on censored data** — see below.
-8. Capture is a hardcoded `DemoSpread`; the real path is a one-time menu parse.
-9. No Live Activity, Control Center control, widget, Focus filter or background task yet.
-10. Grill constraints — slots, cook time, plain-before-marinated — are designed, not implemented in `RoundPlanner`.
+1. **The domain vocabulary predates the adopted scope** — `StationCategory`, `isRationed`, `isMadeToOrder`, `ValueBasis.scarcity` were replaced by printed-menu categories and `tierExclusivity` in the design and not yet in code. This is the first blocker for feature work, and it is a **schema migration**: `station` persists by raw value and falls back to `?? .unknown`, so renaming cases silently re-reads every stored dish as `unknown`.
+2. **`RoundDecision` decode failure** — 72–86% on the first attempt. The retry clears it to **0–8% effective**, and the residual degrades to the tool verdict rather than vanishing.
+3. **`CapacityEngine.fittedMax` fits on censored data** — see below. The app can detect that its capacity model is wrong and cannot yet learn from it.
+4. **`hypothesise` is close to its ceilings** — 2,023 of 2,200 tokens and 33 of 36 transcript entries, 92% of both. It is also the one call the diner waits on, at ~7.5 s.
+5. **`LoopBudget.wallClockLimit` is declared and never read** — layer 7 enforces call count only. Less urgent now a whole round is ~8.4 s, but still unenforced.
+6. Capture is a hardcoded `DemoSpread`; the real path is a one-time menu parse.
+7. No Live Activity, Control Center control, widget, Focus filter or background task yet.
+8. Grill constraints — slots, cook time, plain-before-marinated — are designed, not implemented in `RoundPlanner`.
+
+**Closed since the first draft of this file:** unbounded output *(now capped by `maximumResponseTokens`)*; latency *(the Simulator was pessimistic by ~3×; a round is ~8.4 s then ~3.4 s on device)*; the menu-parse fidelity defect *(96 returned from 95 — did not reproduce, and the assertion now compares names rather than counts, so a recurrence is visible)*.
 
 ### The capacity model has a defect that would not announce itself
 
