@@ -128,7 +128,8 @@ final class RoundAgent {
                         constraints and how much budget is left, then say where the value \
                         is concentrated and what rating you expect from that station.\(exclusion)
                         """,
-                    generating: ValueHypothesis.self
+                    generating: ValueHypothesis.self,
+                    options: Self.bounded(300)
                 ).content
             }
 
@@ -183,7 +184,8 @@ final class RoundAgent {
                         getRemainingCapacity, and checkCapacityModel to see whether the \
                         remaining budget can still be trusted. Then decide.
                         """,
-                    generating: RoundDecision.self
+                    generating: RoundDecision.self,
+                    options: Self.bounded(250)
                 ).content
             }
 
@@ -244,7 +246,8 @@ final class RoundAgent {
                         \(String(format: "%.1f", input.capacity.plateEstimate)) plates.
                         Set the objective for this round. Leave learnAbout empty.
                         """,
-                    generating: RoundIntent.self
+                    generating: RoundIntent.self,
+                    options: Self.bounded(400)
                 ).content
             }) {
                 try await session.respond(
@@ -255,7 +258,8 @@ final class RoundAgent {
                         Hypothesis: \(hypothesis.claim)
                         Set the objective for this round.
                         """,
-                    generating: RoundIntent.self
+                    generating: RoundIntent.self,
+                    options: Self.bounded(400)
                 ).content
             }
 
@@ -278,7 +282,7 @@ final class RoundAgent {
         }
     }
 
-    private enum GenerationFailure {
+    enum GenerationFailure {
         case transient
         case overflow
         case fatal
@@ -319,7 +323,11 @@ final class RoundAgent {
         }
     }
 
-    private static func classify(_ error: Error) -> GenerationFailure {
+    private static func bounded(_ tokens: Int) -> GenerationOptions {
+        GenerationOptions(maximumResponseTokens: tokens)
+    }
+
+    nonisolated static func classify(_ error: Error) -> GenerationFailure {
         guard let generation = error as? LanguageModelSession.GenerationError else { return .fatal }
         switch generation {
         case .decodingFailure, .guardrailViolation: return .transient
