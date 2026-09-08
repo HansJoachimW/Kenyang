@@ -413,7 +413,8 @@ enum MenuCategory: String, Codable, CaseIterable, Sendable {
 
 @Generable
 struct MenuItemDraft: Sendable {
-    @Guide(description: "The item name exactly as printed on the menu")
+    @Guide(description: "The item name exactly as printed on the menu",
+           .pattern(/[^\n]{1,80}/))
     var name: String
 
     @Guide(description: "The printed menu category this item appears under")

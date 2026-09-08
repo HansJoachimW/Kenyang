@@ -246,8 +246,12 @@ final class RoundAgent {
                         \(String(format: "%.1f", input.capacity.plateEstimate)) plates.
                         Set the objective for this round. Leave learnAbout empty.
                         """,
+<<<<<<< HEAD
                     generating: RoundIntent.self,
                     options: Self.bounded(400)
+=======
+                    generating: RoundIntent.self
+>>>>>>> chore/debug-menu
                 ).content
             }) {
                 try await session.respond(
@@ -282,7 +286,11 @@ final class RoundAgent {
         }
     }
 
+<<<<<<< HEAD
     enum GenerationFailure {
+=======
+    private enum GenerationFailure {
+>>>>>>> chore/debug-menu
         case transient
         case overflow
         case fatal
@@ -323,11 +331,15 @@ final class RoundAgent {
         }
     }
 
+<<<<<<< HEAD
     private static func bounded(_ tokens: Int) -> GenerationOptions {
         GenerationOptions(maximumResponseTokens: tokens)
     }
 
     nonisolated static func classify(_ error: Error) -> GenerationFailure {
+=======
+    private static func classify(_ error: Error) -> GenerationFailure {
+>>>>>>> chore/debug-menu
         guard let generation = error as? LanguageModelSession.GenerationError else { return .fatal }
         switch generation {
         case .decodingFailure, .guardrailViolation: return .transient
