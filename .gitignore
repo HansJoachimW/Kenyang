@@ -53,3 +53,12 @@ playground.xcworkspace
 .env
 .env.*
 !.env.example
+
+## Documentation
+BUFFET.md
+CRITERIA.md
+CLAUDE.md
+HANDOFF.md
+PROJECT.md
+TESTS.md
+DESIGN-V2.md

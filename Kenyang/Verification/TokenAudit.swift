@@ -403,23 +403,6 @@ enum TokenAudit {
     }
 }
 
-// MARK: - Menu parse types (Module A is not built; these are the minimum to size it)
-
-@Generable
-struct MenuItemDraft: Sendable {
-    @Guide(description: "The item name exactly as printed on the menu")
-    var name: String
-
-    @Guide(description: "The printed menu category this item appears under")
-    var category: MenuCategory
-}
-
-@Generable
-struct ParsedMenu: Sendable {
-    @Guide(description: "Every item on the menu, one entry each")
-    var items: [MenuItemDraft]
-}
-
 // MARK: - Small string helpers
 
 private func rule(_ c: String, _ n: Int) -> String {

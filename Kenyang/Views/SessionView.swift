@@ -53,6 +53,7 @@ struct SessionView: View {
 
 struct StartView: View {
     let model: SessionViewModel
+    @State private var showingCapture = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -71,8 +72,15 @@ struct StartView: View {
                                    spread: DemoSpread.standard)
             }
             .buttonStyle(.borderedProminent)
+
+            Button("Capture a menu") { showingCapture = true }
+                .font(.footnote)
+                .tint(Palette.accent)
         }
         .padding()
+        .sheet(isPresented: $showingCapture) {
+            MenuCaptureView()
+        }
     }
 }
 

@@ -6,7 +6,7 @@ A buffet is explore–exploit under a knapsack constraint where observation cost
 
 Scope is **order-based, grill-at-your-table all-you-can-eat** — you order from a fixed printed menu, staff bring the food, you cook it at the table.
 
-Built for a seven-criterion challenge on Apple Intelligence and Apple system technologies. Everything runs on device.
+Everything runs on device — the agent, the menu parse and the capacity model. There are no network calls anywhere in the app.
 
 ---
 
@@ -53,9 +53,17 @@ Kenyang/
 ├── ViewModels/
 │   └── SessionViewModel.swift    @Observable, owns phase and session state
 │
+├── Capture/                      Module A — menu ingest
+│   ├── MenuTextExtractor.swift   PDF text layer first, Vision OCR fallback
+│   ├── MenuParser.swift          @Generable ParsedMenu, chunked and retried
+│   ├── SectionClassifier.swift   heading → category, heading-as-item filter
+│   └── CaptureLog.swift          [CAPTURE] console trace
+│
 ├── Views/
 │   ├── SessionView.swift         Root, Start, Plan, Eating, Terminal, Trace
-│   └── VerificationView.swift    the in-app battery
+│   ├── VerificationView.swift    the in-app battery
+│   ├── MenuCaptureView.swift     import → extract → parse → review
+│   └── Palette.swift             the six design tokens, light/dark
 │
 ├── Intents/
 │   ├── Entities.swift            AppEntity + EntityQuery
@@ -138,8 +146,8 @@ Each is a separate type, so each can be tested and demonstrated in isolation.
 | Layer | Type | Behaviour |
 |---|---|---|
 | 1 Availability | `ModelAvailability` | Distinguishes not-enabled, downloading and unsupported; each gets its own message and a real degraded path |
-| 2 Input trust | `RoundAgent.instructions` | Dish and station names are declared untrusted data, and only ever enter prompts — never `Instructions` |
-| 3 Structural | `@Generable` enums | The model cannot invent a station or a basis |
+| 2 Input trust | `RoundAgent.instructions` | Item names and menu section headings are declared untrusted data, and only ever enter prompts — never `Instructions` |
+| 3 Structural | `@Generable` enums | The model cannot invent a category or a basis |
 | 4 Grounding | `OutputValidator` | Rejects volume framing before display |
 | 5 Statistical | `StatisticalGuard` | No claim below minimum *n* |
 | 6 Action | `ExclusionValidator`, `StopGuard`, `TriageGuard` | Ternary exclusion; forced stop; forced decline |
@@ -150,7 +158,7 @@ Each is a separate type, so each can be tested and demonstrated in isolation.
 
 **`StopGuard` and `TriageGuard` force stopping and declining.** Across the day-3 spike the model chose `stop` 0/3 times and `decline` 0/2 times, even handed exhausted capacity. It recognises support well and contradiction moderately, but **it will not choose to end the meal.** So the app computes those deterministically and overrides. A guardrail overriding an agent is legitimate; Swift *choosing the next action* would not be — the distinction is that this fires on a threshold, not on a judgement.
 
-**`OutputValidator` exists because instructions alone did not hold.** A prompt-injection test compromised the app's core stance — *"eat as much as possible to get your money's worth"* — which the design forbids by name. Instruction hardening is necessary and insufficient; the claim is now checked before display.
+**`OutputValidator` exists because instructions alone did not hold.** A prompt-injection test compromised the app's core stance — *"eat as much as possible to get your money's worth"* — which the app's stance forbids by name. Instruction hardening is necessary and insufficient; the claim is now checked before display.
 
 **`ConsistencyGuard` catches the model contradicting itself.** Observed repeatedly: the reasoning field correctly says *"the tools say the hypothesis is contradicted"* and the move field then says `exploit`. When the stated reason disagrees with the chosen move, the move is overridden.
 
@@ -242,12 +250,12 @@ Session start · spread capture · tool-calling agent · hypothesis with pre-reg
 
 ### Known defects, ranked
 
-1. **The domain vocabulary predates the adopted scope** — `StationCategory`, `isRationed`, `isMadeToOrder`, `ValueBasis.scarcity` were replaced by printed-menu categories and `tierExclusivity` in the design and not yet in code. This is the first blocker for feature work, and it is a **schema migration**: `station` persists by raw value and falls back to `?? .unknown`, so renaming cases silently re-reads every stored dish as `unknown`.
+1. **The parse cannot report "there is nothing here."** Handed a menu contents page with no dish names, the model returned ten items, every one fabricated from a heading — it has an `unknown` case and never used it. A deterministic guard refuses the page instead, but the underlying behaviour stands.
 2. **`RoundDecision` decode failure** — 72–86% on the first attempt. The retry clears it to **0–8% effective**, and the residual degrades to the tool verdict rather than vanishing.
 3. **`CapacityEngine.fittedMax` fits on censored data** — see below. The app can detect that its capacity model is wrong and cannot yet learn from it.
 4. **`hypothesise` is close to its ceilings** — 2,023 of 2,200 tokens and 33 of 36 transcript entries, 92% of both. It is also the one call the diner waits on, at ~7.5 s.
 5. **`LoopBudget.wallClockLimit` is declared and never read** — layer 7 enforces call count only. Less urgent now a whole round is ~8.4 s, but still unenforced.
-6. Capture is a hardcoded `DemoSpread`; the real path is a one-time menu parse.
+6. **Capture is half built.** `Capture/` runs photo → OCR → parse → categorised list on device; nothing is persisted yet, so sessions still start from `DemoSpread`. Outstanding: geometry-aware extraction, multi-image accumulation, and the confirmation step.
 7. No Live Activity, Control Center control, widget, Focus filter or background task yet.
 8. Grill constraints — slots, cook time, plain-before-marinated — are designed, not implemented in `RoundPlanner`.
 
@@ -269,23 +277,8 @@ Deliberately not claimed here yet. What is measured: the agent composes rather t
 
 The app is Alabaster Grey `#E5E4E2` / Onyx `#0A0A0A` / Blue Slate `#536878`, and the warm option was rejected on the stance rather than on taste.
 
-Saturated red-orange — `#AA0003`, `#FF4500`, `#FF6B6B` — is the appetite palette, the one fast-food branding uses to drive consumption. The design forbids volume framing by name and `OutputValidator` enforces it in code. **Shipping the colour of "eat more" while the copy says "stop before you regret it" would contradict the app's own guardrail.**
+Saturated red-orange — `#AA0003`, `#FF4500`, `#FF6B6B` — is the appetite palette, the one fast-food branding uses to drive consumption. Volume framing is forbidden by the app's own stance, and `OutputValidator` enforces it in code. **Shipping the colour of "eat more" while the copy says "stop before you regret it" would contradict the app's own guardrail.**
 
 Onyx `#0A0A0A` is also the Dynamic Island, which is the primary in-meal interface — a near-black base reads as part of the hardware rather than a window on top of it, and survives a dim grill-at-your-table room.
 
 One trap, recorded because it is easy to walk into: Blue Slate `#536878` is the brand accent and **fails body text on Onyx at 3.4:1**. Dark mode uses Blue Slate Light `#7C93A6` (6.2:1) instead. Colour is never the only indicator — every exclusion state carries a word: *safe* · *excluded* · *ask staff*.
-
----
-
-## Design record
-
-The full record — design rationale, the rubric decoder, the test register with every measurement, and a 39-page design document — lives outside this repository, alongside it in the parent directory:
-
-```
-Challenge-3/
-├── Prompts/     HANDOFF.md · TESTS.md · PROJECT.md · DESIGN.md · DESIGN-V2.md
-├── Designs/     C3 Design V1.2.pdf   ← the complete design record
-├── Ideas/       BUFFET.md (design) · CRITERIA.md (rubric decoder)
-├── Spike/       the day-1 harness and run logs
-└── Kenyang/     this repository
-```
