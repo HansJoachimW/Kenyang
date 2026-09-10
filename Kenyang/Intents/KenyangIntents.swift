@@ -8,7 +8,7 @@ struct RateDishIntent: AppIntent {
     static var openAppWhenRun = false
 
     @Parameter(title: "Dish")
-    var dish: DishEntity
+    var dish: MenuItemEntity
 
     @Parameter(title: "Rating")
     var rating: Rating

@@ -20,6 +20,8 @@ struct KenyangApp: App {
                 .modelContainer(store.container)
                 .task {
                     // TESTS.md T50/T51/T52 harness — see Verification/TokenAudit.swift
+                    await SpotlightIndexer.reindex(store)
+
                     let args = CommandLine.arguments
                     let all = args.contains("--run-all")
 

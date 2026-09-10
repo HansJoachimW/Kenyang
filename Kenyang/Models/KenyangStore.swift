@@ -124,6 +124,25 @@ final class KenyangStore {
         return (try? context.fetch(descriptor)) ?? []
     }
 
+    func allSightings() -> [DishSighting] {
+        (try? context.fetch(FetchDescriptor<DishSighting>())) ?? []
+    }
+
+    func allRestaurants() -> [Restaurant] {
+        let descriptor = FetchDescriptor<Restaurant>(sortBy: [SortDescriptor(\.name)])
+        return (try? context.fetch(descriptor)) ?? []
+    }
+
+    /// The most recent rating per dish, for entities that carry it into Spotlight
+    /// and for `EntityPropertyQuery` filters like *dishes I rated good at Gyu-Kaku*.
+    func ratingsByDishName() -> [String: Rating] {
+        let descriptor = FetchDescriptor<TasteEvent>(sortBy: [SortDescriptor(\.at, order: .forward)])
+        let events = (try? context.fetch(descriptor)) ?? []
+        return events.reduce(into: [:]) { latest, event in
+            latest[event.dishName] = event.rating
+        }
+    }
+
     @discardableResult
     func startVisit(restaurantName: String,
                     pricePerHead: Double,

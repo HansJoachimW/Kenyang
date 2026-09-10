@@ -53,6 +53,7 @@ struct SessionView: View {
 
 struct StartView: View {
     let model: SessionViewModel
+    @Environment(\.kenyangStore) private var store
     @State private var showingCapture = false
 
     var body: some View {
@@ -85,6 +86,9 @@ struct StartView: View {
                                    seatingLimit: 90,
                                    plates: 3,
                                    spread: menu.spread)
+                // A captured menu is the only thing that adds dishes, so it is the
+                // only moment the Spotlight index goes stale.
+                Task { await SpotlightIndexer.reindex(store) }
             }
         }
     }

@@ -1,3 +1,5 @@
+import AppIntents
+import CoreSpotlight
 import Foundation
 import FoundationModels
 import SwiftUI
@@ -27,6 +29,7 @@ final class VerificationRunner {
         t76_vocabularyMigration()
         t79_captureQualityGuard()
         t23_confirmationGate()
+        await t6_t12_t69_entityQueries()
         t30_exclusionValidator()
         t29_minimumSamples()
         t37_counterfactual()
@@ -171,6 +174,112 @@ final class VerificationRunner {
 
         let pass = heldClean && wroteVenue && wroteDishes && tiered && capture.canConfirm
         emit("T23: \(pass ? "PASS" : "FAIL") — capture path only. The intent write paths are T10/T72")
+        emit("")
+    }
+
+    private func t6_t12_t69_entityQueries() async {
+        emit("──── T6 · T12 ⭐ · T69 — the four entity types resolve ────")
+        emit("Entities that compile are not entities that resolve. Drive every query")
+        emit("the way Shortcuts, Siri and Spotlight will.")
+
+        let scratch = KenyangStore(container: KenyangStore.makeContainer(inMemory: true))
+        let visit = scratch.startVisit(restaurantName: "Gyu-Kaku",
+                                       pricePerHead: 629_800,
+                                       seatingLimitMinutes: 90,
+                                       maxSatiety: 9)
+        scratch.addSightings([
+            (name: "Karubi", category: .meat, printed: "STANDARD MEAT", tier: 0),
+            (name: "Harami", category: .meat, printed: "STANDARD MEAT", tier: 0),
+            (name: "Salmon Sashimi", category: .raw, printed: "SUSHI", tier: 0),
+            (name: "Agedashi Tofu", category: .fried, printed: "APPETIZER & AGEMONO", tier: 0)
+        ], to: visit)
+        scratch.rate(dishName: "Karubi", category: .meat, rating: .good,
+                     portion: .normal, in: visit, roundIndex: 1)
+        scratch.rate(dishName: "Agedashi Tofu", category: .fried, rating: .skip,
+                     portion: .taste, in: visit, roundIndex: 1)
+
+        var checks: [(String, Bool)] = []
+        let items = MenuItemEntityQuery(store: scratch)
+        let venues = VenueEntityQuery(store: scratch)
+        let visits = VisitEntityQuery(store: scratch)
+        let categories = MenuCategoryEntityQuery()
+
+        // T6 — a Shortcuts picker calls suggestedEntities, then entities(for:).
+        let suggested = (try? await items.suggestedEntities()) ?? []
+        checks.append(("T6 menu items offered to a picker", suggested.count == 4))
+        emit("  suggestedEntities → \(suggested.count) item(s): \(suggested.map(\.name).joined(separator: ", "))")
+
+        let byID = (try? await items.entities(for: ["Karubi"])) ?? []
+        checks.append(("T6 an item round-trips by id", byID.first?.name == "Karubi"))
+        emit("  entities(for: [\"Karubi\"]) → \(byID.first?.name ?? "nothing")")
+
+        let venueList = (try? await venues.suggestedEntities()) ?? []
+        checks.append(("T6 venue resolves", venueList.first?.name == "Gyu-Kaku"))
+        emit("  venues → \(venueList.map(\.name).joined(separator: ", "))")
+
+        let mealList = (try? await visits.suggestedEntities()) ?? []
+        checks.append(("T6 meal resolves", mealList.count == 1))
+        emit("  meals → \(mealList.map { "\($0.venueName), \($0.ratedCount) rated" }.joined(separator: ", "))")
+
+        let categoryList = (try? await categories.entities(matching: "sashimi")) ?? []
+        checks.append(("T6 category resolves by label", categoryList.first?.category == .raw))
+        emit("  categories matching \"sashimi\" → \(categoryList.map(\.name).joined(separator: ", "))")
+
+        // T66's shape — a spoken name resolves against this meal's menu, not the world.
+        let spoken = (try? await items.entities(matching: "harami")) ?? []
+        checks.append(("Siri resolves a spoken name", spoken.first?.name == "Harami"))
+        emit("  entities(matching: \"harami\") → \(spoken.map(\.name).joined(separator: ", "))")
+
+        let miss = (try? await items.entities(matching: "tteokbokki")) ?? []
+        checks.append(("an unknown name returns nothing, not a guess", miss.isEmpty))
+        emit("  entities(matching: \"tteokbokki\") → \(miss.isEmpty ? "nothing — the system asks" : miss.map(\.name).joined(separator: ", "))")
+
+        // T12 — the Spotlight payload has to carry more than a name.
+        let sashimi = suggested.first { $0.name == "Salmon Sashimi" }
+        let attributes = sashimi?.attributeSet
+        let indexed = attributes?.title == "Salmon Sashimi"
+            && (attributes?.keywords?.contains("Raw & sashimi") ?? false)
+        checks.append(("T12 the dish carries a Spotlight payload", indexed))
+        emit("  attributeSet → title \"\(attributes?.title ?? "—")\", keywords \(attributes?.keywords ?? [])")
+
+        // T69 — "dishes I rated good at Gyu-Kaku", the way Shortcuts composes it.
+        let good = (try? await items.entities(
+            matching: [{ $0.rating == .good }, { $0.venueName == "Gyu-Kaku" }],
+            mode: .and,
+            sortedBy: [],
+            limit: nil)) ?? []
+        checks.append(("T69 rated-good at a venue", good.map(\.name) == ["Karubi"]))
+        emit("  rated good at Gyu-Kaku → \(good.map(\.name).joined(separator: ", "))")
+
+        // EntityQuerySort has no public initialiser — Shortcuts builds it — so the
+        // sort path is exercised on device, not here. The filter is the substance.
+        let meat = (try? await items.entities(
+            matching: [{ $0.category == .meat }],
+            mode: .and,
+            sortedBy: [],
+            limit: nil)) ?? []
+        checks.append(("T69 filters by category", meat.map(\.name) == ["Harami", "Karubi"]))
+        emit("  category is meat → \(meat.map(\.name).joined(separator: ", "))")
+
+        let either = (try? await items.entities(
+            matching: [{ $0.category == .raw }, { $0.rating == .skip }],
+            mode: .or,
+            sortedBy: [],
+            limit: nil)) ?? []
+        checks.append(("T69 honours OR mode", Set(either.map(\.name)) == ["Salmon Sashimi", "Agedashi Tofu"]))
+        emit("  raw OR rated skip → \(either.map(\.name).joined(separator: ", "))")
+
+        let capped = (try? await items.entities(matching: [], mode: .and,
+                                                sortedBy: [], limit: 2)) ?? []
+        checks.append(("T69 honours limit", capped.count == 2))
+        emit("  limit 2 → \(capped.count) item(s)")
+
+        emit("")
+        for (label, passed) in checks { emit("\(passed ? "✅" : "❌") \(label)") }
+        let failures = checks.filter { !$0.1 }.count
+        emit("→ resolution is proven here; the Shortcuts editor, Siri and the Spotlight")
+        emit("  index itself are on-device checks — T6/T11/T12 close on the phone")
+        emit("T6/T12/T69: \(failures == 0 ? "PASS" : "FAIL — \(failures) of \(checks.count) checks")")
         emit("")
     }
 
@@ -513,7 +622,7 @@ struct VerificationView: View {
         [
             Harness(id: "--verify",
                     name: "App battery",
-                    detail: "T21 · T22 · T23 · T29 · T30 · T34 · T35 · T37 · T79",
+                    detail: "T6 · T12 · T21 · T22 · T23 · T29 · T30 · T34 · T35 · T37 · T69 · T79",
                     rendersInApp: true) { await runner.runAll() },
             Harness(id: "--token-audit",
                     name: "Token audit",
