@@ -79,8 +79,8 @@ enum MenuTextExtractor {
         var recognised: [String] = []
         for index in 0..<document.pageCount {
             guard let page = document.page(at: index), let image = render(page) else { continue }
-            let text = try await recognise(image)
-            if !text.isEmpty { recognised.append(text) }
+            let read = try await recognise(image)
+            if !read.text.isEmpty { recognised.append(read.text) }
         }
 
         let joined = recognised.joined(separator: "\n")
@@ -92,9 +92,17 @@ enum MenuTextExtractor {
         guard let uiImage = UIImage(data: data), let image = uiImage.cgImage else {
             throw Failure.unreadableImage
         }
-        let text = try await recognise(image, orientation: uiImage.cgOrientation)
-        guard !text.isEmpty else { throw Failure.noTextFound }
-        return ExtractedText(text: text, source: .visionOCR, pages: 1)
+        if let complaint = CaptureQualityGuard.inspect(image) {
+            CaptureLog.line("REFUSED before recognition — \(complaint)")
+            throw complaint
+        }
+        let read = try await recognise(image, orientation: uiImage.cgOrientation)
+        guard !read.text.isEmpty else { throw Failure.noTextFound }
+        if let complaint = CaptureQualityGuard.inspect(text: read.text, confidence: read.confidence) {
+            CaptureLog.line("REFUSED after recognition — \(complaint)")
+            throw complaint
+        }
+        return ExtractedText(text: read.text, source: .visionOCR, pages: 1)
     }
 
     static let preferredLanguageCodes: Set<String> = ["en", "ja", "ko", "zh"]
@@ -103,8 +111,15 @@ enum MenuTextExtractor {
     /// on a 3,000 px page — under the default, so the names die before recognition.
     static let minimumTextHeightFraction: Float = 0.005
 
+    struct Reading {
+        var text: String
+        /// Mean of Vision's own top-candidate confidence across every recognised line.
+        /// `nil` when nothing was recognised at all.
+        var confidence: Float?
+    }
+
     private static func recognise(_ image: CGImage,
-                                  orientation: CGImagePropertyOrientation = .up) async throws -> String {
+                                  orientation: CGImagePropertyOrientation = .up) async throws -> Reading {
         // RecognizeDocumentsRequest, not RecognizeTextRequest. A menu poster is a
         // structured document, and this returns paragraphs — text already grouped by
         // the block it was printed in — instead of one flat transcript that loses
@@ -129,11 +144,15 @@ enum MenuTextExtractor {
         CaptureLog.line("image: \(image.width)×\(image.height) px (\(String(format: "%.1f", Double(pixels) / 1_000_000)) MP)")
 
         var lines: [String] = []
+        var confidences: [Float] = []
         // A paragraph is one printed block, so keeping paragraph boundaries is what
         // preserves "these items sit under this heading" through the flattening.
         func collect(_ observations: [DocumentObservation]) -> Int {
             var added = 0
             for document in observations {
+                confidences += document.document.text.lines.compactMap {
+                    $0.topCandidates(1).first?.confidence
+                }
                 let blocks = document.document.paragraphs.map(\.transcript)
                 for block in blocks.isEmpty ? [document.document.text.transcript] : blocks {
                     let text = block.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -172,7 +191,12 @@ enum MenuTextExtractor {
 
         let whole = collect(try await request.perform(on: image, orientation: orientation))
         CaptureLog.line("  whole image: +\(whole) line(s) not seen in any tile")
-        return lines.joined(separator: "\n")
+
+        let mean = confidences.isEmpty ? nil : confidences.reduce(0, +) / Float(confidences.count)
+        if let mean {
+            CaptureLog.line("  confidence: \(Int(mean * 100))% mean over \(confidences.count) line(s)")
+        }
+        return Reading(text: lines.joined(separator: "\n"), confidence: mean)
     }
 
     /// Vision downsamples a large image before recognition, so an item name that is

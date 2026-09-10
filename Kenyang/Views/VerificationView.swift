@@ -25,6 +25,7 @@ final class VerificationRunner {
         emit("")
 
         t76_vocabularyMigration()
+        t79_captureQualityGuard()
         t23_confirmationGate()
         t30_exclusionValidator()
         t29_minimumSamples()
@@ -61,6 +62,54 @@ final class VerificationRunner {
             emit("   .unknown into every existing row, which a decodability check cannot see.")
         }
         emit("T76: \(audit.isClean ? "PASS" : "FAIL — \(audit.damaged) of \(audit.total) rows lost their category")")
+        emit("")
+    }
+
+    private func t79_captureQualityGuard() {
+        emit("──── T79 ⭐ capture refuses what it cannot read ────")
+        emit("A parse handed 33 characters returns four invented dishes (T77). The model")
+        emit("will not abstain, so the refusal has to be deterministic and upstream.")
+
+        func image(width: Int, height: Int) -> CGImage? {
+            CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                      bytesPerRow: 0, space: CGColorSpaceCreateDeviceGray(),
+                      bitmapInfo: CGImageAlphaInfo.none.rawValue)?.makeImage()
+        }
+
+        var checks: [(String, Bool)] = []
+
+        // The real share-sheet copy that started this: 224×224.
+        if let thumbnail = image(width: 224, height: 224) {
+            let complaint = CaptureQualityGuard.inspect(thumbnail)
+            checks.append(("224×224 share-sheet copy refused", complaint == .tooFewPixels(megapixels: 0.050176)))
+            emit("  224×224 → \(complaint == nil ? "accepted" : "REFUSED")")
+        }
+        // The published menu that yields 71 real items must still get through.
+        if let poster = image(width: 1024, height: 724) {
+            let complaint = CaptureQualityGuard.inspect(poster)
+            checks.append(("1024×724 published menu accepted", complaint == nil))
+            emit("  1024×724 → \(complaint == nil ? "accepted" : "REFUSED")")
+        }
+
+        let thin = CaptureQualityGuard.inspect(text: "TANDARD UFFEUI\n4E0O STANDARD MEAT", confidence: 0.9)
+        checks.append(("33 characters refused", thin == .tooLittleText(characters: 33)))
+        emit("  33 characters, high confidence → \(thin == nil ? "accepted" : "REFUSED")")
+
+        let body = String(repeating: "Karubi Harami Gyu Tan ", count: 40)
+        let glare = CaptureQualityGuard.inspect(text: body, confidence: 0.30)
+        checks.append(("low confidence refused", glare == .unreliableText(confidence: 0.30)))
+        emit("  \(body.count) characters at 30% confidence → \(glare == nil ? "accepted" : "REFUSED")")
+
+        let clean = CaptureQualityGuard.inspect(text: body, confidence: 0.82)
+        checks.append(("a good read is accepted", clean == nil))
+        emit("  \(body.count) characters at 82% confidence → \(clean == nil ? "accepted" : "REFUSED")")
+
+        emit("")
+        for (label, passed) in checks { emit("\(passed ? "✅" : "❌") \(label)") }
+        let failures = checks.filter { !$0.1 }.count
+        emit("→ the guard refuses against the app's own interest — it would rather return")
+        emit("  nothing than a menu nobody printed (CRITERIA.md §6)")
+        emit("T79: \(failures == 0 ? "PASS" : "FAIL — \(failures) of \(checks.count) checks")")
         emit("")
     }
 
@@ -464,7 +513,7 @@ struct VerificationView: View {
         [
             Harness(id: "--verify",
                     name: "App battery",
-                    detail: "T21 · T22 · T23 · T29 · T30 · T34 · T35 · T37",
+                    detail: "T21 · T22 · T23 · T29 · T30 · T34 · T35 · T37 · T79",
                     rendersInApp: true) { await runner.runAll() },
             Harness(id: "--token-audit",
                     name: "Token audit",
