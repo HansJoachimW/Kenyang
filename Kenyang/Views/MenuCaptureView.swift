@@ -30,11 +30,15 @@ struct CapturedMenu: Sendable {
 final class MenuCaptureViewModel {
     var captured: CapturedMenu?
     var extracted: ExtractedText?
-    var drafts: [MenuItemDraft] = []
+    var items: [MenuDraftItem] = []
     var failure: String?
     var isLoading = false
     var isReading = false
     var parseProgress: (done: Int, total: Int)?
+
+    var venueName = ""
+    var pricePerHead: Double = 250_000
+    var tierName = ""
 
     func accept(fileResult result: Result<URL, Error>) {
         failure = nil
@@ -76,11 +80,13 @@ final class MenuCaptureViewModel {
     func read() async {
         guard let captured else { return }
         failure = nil
-        extracted = nil
         isReading = true
         defer { isReading = false }
         do {
-            extracted = try await MenuTextExtractor.extract(from: captured)
+            let page = try await MenuTextExtractor.extract(from: captured)
+            extracted = extracted?.appending(page) ?? page
+            items = []
+            self.captured = nil
         } catch {
             failure = error.localizedDescription
         }
@@ -89,73 +95,90 @@ final class MenuCaptureViewModel {
     func parse() async {
         guard let extracted else { return }
         failure = nil
-        drafts = []
+        items = []
         parseProgress = (0, 1)
         defer { parseProgress = nil }
         do {
-            drafts = try await MenuParser.parse(extracted) { [weak self] done, total in
+            items = try await MenuParser.parse(extracted) { [weak self] done, total in
                 self?.parseProgress = (done, total)
             }
+            .map(MenuDraftItem.init)
+            .sorted { ($0.printedSection, $0.name) < ($1.printedSection, $1.name) }
         } catch {
             failure = error.localizedDescription
         }
     }
 
-    var draftsBySection: [(section: String, items: [MenuItemDraft])] {
-        Dictionary(grouping: drafts) { $0.printedSection.isEmpty ? "No heading" : $0.printedSection }
-            .map { (section: $0.key, items: $0.value.sorted { $0.name < $1.name }) }
-            .sorted { $0.section < $1.section }
+    var unknownCount: Int { items.filter { $0.category == .unknown }.count }
+
+    func addItem() {
+        items.append(MenuDraftItem(printedSection: items.last?.printedSection ?? ""))
     }
 
-    var unknownCount: Int { drafts.filter { $0.category == .unknown }.count }
+    func deleteItems(at offsets: IndexSet) {
+        items.remove(atOffsets: offsets)
+    }
+
+    var namedItems: [MenuDraftItem] { items.filter(\.isNamed) }
+
+    var canConfirm: Bool {
+        !venueName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !tierName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !namedItems.isEmpty
+    }
+
+    /// The single write path. Everything before this is a draft the diner can still change.
+    func confirm(using store: KenyangStore) -> ConfirmedMenu {
+        let venue = venueName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tier = tierName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rank = store.tierRank(of: tier, atRestaurantNamed: venue, pricePerHead: pricePerHead)
+        CaptureLog.rule("CONFIRMED — \(namedItems.count) item(s) at \(venue), tier \"\(tier)\" (rank \(rank))")
+        return ConfirmedMenu(
+            venueName: venue,
+            pricePerHead: pricePerHead,
+            tierName: tier,
+            spread: namedItems.map {
+                (name: $0.name.trimmingCharacters(in: .whitespacesAndNewlines),
+                 category: $0.category,
+                 printed: $0.printedSection,
+                 tier: rank)
+            }
+        )
+    }
+
+    /// The venue's ladder so far, so the rank this import will take is visible before it is taken.
+    func knownTiers(in store: KenyangStore) -> [String] {
+        let venue = venueName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !venue.isEmpty else { return [] }
+        return store.restaurant(named: venue)?.tierNames ?? []
+    }
 
     func clear() {
         captured = nil
         extracted = nil
-        drafts = []
+        items = []
         failure = nil
     }
 }
 
 struct MenuCaptureView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.kenyangStore) private var store
     @State private var model = MenuCaptureViewModel()
     @State private var showingFileImporter = false
     @State private var photoItem: PhotosPickerItem?
 
+    /// Called once, with what the diner confirmed. Until it fires nothing has been written.
+    var onConfirm: (ConfirmedMenu) -> Void
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        intro
-                        pickers
-                        if model.isLoading { ProgressView().tint(Palette.accent) }
-                        if let captured = model.captured { summary(captured) }
-                        if model.isReading {
-                            HStack(spacing: 8) {
-                                ProgressView().tint(Palette.accent)
-                                Text("Reading the menu…")
-                                    .font(.footnote)
-                                    .foregroundStyle(Palette.muted)
-                            }
-                        }
-                        if let extracted = model.extracted { extractedRow(extracted) }
-                        if let progress = model.parseProgress {
-                            HStack(spacing: 8) {
-                                ProgressView().tint(Palette.accent)
-                                Text("Reading items… \(progress.done) of \(progress.total)")
-                                    .font(.footnote)
-                                    .foregroundStyle(Palette.muted)
-                            }
-                        }
-                        if !model.drafts.isEmpty { draftList }
-                        if let failure = model.failure { failureRow(failure) }
-                    }
-                .padding()
+            Group {
+                if model.items.isEmpty { importStage } else { confirmStage }
             }
             .background(Palette.surface)
             .scrollContentBackground(.hidden)
-            .navigationTitle("Capture a menu")
+            .navigationTitle(model.items.isEmpty ? "Capture a menu" : "Confirm the menu")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Palette.surface, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
@@ -174,12 +197,42 @@ struct MenuCaptureView: View {
         }
     }
 
+    private var importStage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                intro
+                pickers
+                if model.isLoading { ProgressView().tint(Palette.accent) }
+                if let captured = model.captured { summary(captured) }
+                if model.isReading {
+                    HStack(spacing: 8) {
+                        ProgressView().tint(Palette.accent)
+                        Text("Reading the menu…")
+                            .font(.footnote)
+                            .foregroundStyle(Palette.muted)
+                    }
+                }
+                if let extracted = model.extracted { extractedRow(extracted) }
+                if let progress = model.parseProgress {
+                    HStack(spacing: 8) {
+                        ProgressView().tint(Palette.accent)
+                        Text("Reading items… \(progress.done) of \(progress.total)")
+                            .font(.footnote)
+                            .foregroundStyle(Palette.muted)
+                    }
+                }
+                if let failure = model.failure { failureRow(failure) }
+            }
+            .padding()
+        }
+    }
+
     private var intro: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Read the menu once per venue.")
                 .font(.headline)
                 .foregroundStyle(Palette.ink)
-            Text("A PDF is read directly. A photo is read with on-device text recognition. Nothing is written until you confirm it.")
+            Text("A PDF is read directly. A photo is read with on-device text recognition. Read several pages one after another to cover a whole menu. Nothing is written until you confirm it.")
                 .font(.footnote)
                 .foregroundStyle(Palette.muted)
         }
@@ -240,56 +293,97 @@ struct MenuCaptureView: View {
                 .textSelection(.enabled)
                 .lineLimit(6)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Button("Find the items") { Task { await model.parse() } }
-                .font(.caption.weight(.medium))
-                .tint(Palette.accent)
-                .disabled(model.parseProgress != nil)
+            Text("Add another page above to read more of the menu into this text.")
+                .font(.caption2)
+                .foregroundStyle(Palette.muted)
+            HStack(spacing: 16) {
+                Button("Find the items") { Task { await model.parse() } }
+                    .font(.caption.weight(.medium))
+                    .tint(Palette.accent)
+                    .disabled(model.parseProgress != nil)
+                Button("Start over") { model.clear() }
+                    .font(.caption)
+                    .tint(Palette.muted)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Palette.safe.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private var draftList: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("\(model.drafts.count) items")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Palette.ink)
-                Spacer()
-                if model.unknownCount > 0 {
-                    Text("\(model.unknownCount) uncategorised")
-                        .font(.caption)
-                        .foregroundStyle(Palette.unknown)
+    private var confirmStage: some View {
+        Form {
+            Section {
+                TextField("Venue", text: $model.venueName)
+                LabeledContent("Price per head") {
+                    TextField("Price per head", value: $model.pricePerHead, format: .number)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
                 }
+                TextField("Menu tier — Standard, Premium…", text: $model.tierName)
+            } header: {
+                Text("Where this menu is from")
+            } footer: {
+                let known = model.knownTiers(in: store)
+                Text(known.isEmpty
+                     ? "Which menu you import is the tier, so every item takes it. Import the base menu first — tiers rank in the order you add them."
+                     : "Tiers already known here: \(known.joined(separator: " · ")). A new name is added after these.")
             }
 
-            Text("Check these before anything is saved. Headings are shown exactly as printed.")
-                .font(.caption)
-                .foregroundStyle(Palette.muted)
-
-            ForEach(model.draftsBySection, id: \.section) { group in
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(group.section)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(Palette.accent)
-                    ForEach(group.items) { item in
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(item.name)
-                                .font(.footnote)
-                                .foregroundStyle(Palette.ink)
-                            Spacer(minLength: 12)
-                            Text(item.category.label)
+            Section {
+                ForEach($model.items) { $item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField("Item name", text: $item.name)
+                            .font(.footnote)
+                        HStack {
+                            TextField("Printed heading", text: $item.printedSection)
                                 .font(.caption2)
-                                .foregroundStyle(item.category == .unknown ? Palette.unknown : Palette.muted)
+                                .foregroundStyle(Palette.muted)
+                            Spacer(minLength: 12)
+                            Picker("", selection: $item.category) {
+                                ForEach(MenuCategory.allCases, id: \.self) { category in
+                                    Text(category.label).tag(category)
+                                }
+                            }
+                            .labelsHidden()
+                            .tint(item.category == .unknown ? Palette.unknown : Palette.accent)
                         }
                     }
                 }
+                .onDelete(perform: model.deleteItems)
+
+                Button {
+                    model.addItem()
+                } label: {
+                    Label("Add an item", systemImage: "plus")
+                        .font(.footnote)
+                }
+                .tint(Palette.accent)
+            } header: {
+                HStack {
+                    Text("\(model.namedItems.count) items")
+                    Spacer()
+                    if model.unknownCount > 0 {
+                        Text("\(model.unknownCount) uncategorised")
+                            .foregroundStyle(Palette.unknown)
+                    }
+                }
+            } footer: {
+                Text("Swipe to remove anything the reader invented, and correct what it misread. Nothing is written until you save.")
+            }
+
+            Section {
+                Button("Save and start the meal") {
+                    onConfirm(model.confirm(using: store))
+                    dismiss()
+                }
+                .disabled(!model.canConfirm)
+                .tint(Palette.accent)
+
+                Button("Discard and start over", role: .destructive) { model.clear() }
+                    .font(.footnote)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Palette.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func failureRow(_ message: String) -> some View {

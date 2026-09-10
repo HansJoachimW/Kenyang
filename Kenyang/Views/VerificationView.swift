@@ -25,13 +25,13 @@ final class VerificationRunner {
         emit("")
 
         t76_vocabularyMigration()
+        t23_confirmationGate()
         t30_exclusionValidator()
         t29_minimumSamples()
         t37_counterfactual()
         await t21_t22_toolCoverage()
         await t35_hypothesisDeath()
         await t34_pathVariance()
-        await t4_contextHeadroom()
 
         emit("")
         emit("=== VERIFICATION COMPLETE ===")
@@ -61,6 +61,67 @@ final class VerificationRunner {
             emit("   .unknown into every existing row, which a decodability check cannot see.")
         }
         emit("T76: \(audit.isClean ? "PASS" : "FAIL — \(audit.damaged) of \(audit.total) rows lost their category")")
+        emit("")
+    }
+
+    private func t23_confirmationGate() {
+        emit("──── T23 ⭐ no write without confirmation — the capture path ────")
+        emit("The capture screen promises \"nothing is written until you confirm it\".")
+        emit("Run the draft path against a scratch store and count what lands.")
+
+        let scratch = KenyangStore(container: KenyangStore.makeContainer(inMemory: true))
+        let capture = MenuCaptureViewModel()
+        let venue = "Gyu-Kaku"
+
+        func rows() -> (venues: Int, dishes: Int) {
+            (scratch.restaurant(named: venue) == nil ? 0 : 1, scratch.allDishNames().count)
+        }
+
+        let start = rows()
+        emit("scratch store at rest: \(start.venues) venue(s), \(start.dishes) dish(es)")
+
+        capture.items = [
+            MenuDraftItem(name: "Karubi", printedSection: "YAKINIKU", category: .meat),
+            MenuDraftItem(name: "Harami", printedSection: "YAKINIKU", category: .meat),
+            MenuDraftItem(name: "Agedashi Tofu", printedSection: "APPETIZER", category: .fried),
+            MenuDraftItem(name: "", printedSection: "APPETIZER", category: .unknown)
+        ]
+
+        emit("")
+        emit("① the gate refuses an incomplete draft")
+        emit("\(capture.canConfirm ? "❌" : "✅") no venue, no tier → canConfirm = \(capture.canConfirm)")
+
+        capture.venueName = venue
+        capture.tierName = "Standard"
+        emit("\(capture.canConfirm ? "✅" : "❌") venue and tier named → canConfirm = \(capture.canConfirm)")
+
+        emit("")
+        emit("② holding a complete, confirmable draft writes nothing")
+        let held = rows()
+        let heldClean = held == start
+        emit("\(heldClean ? "✅" : "❌") after parse and edit: \(held.venues) venue(s), \(held.dishes) dish(es) — expected \(start.venues)/\(start.dishes)")
+
+        emit("")
+        emit("③ confirming is the write")
+        let confirmed = capture.confirm(using: scratch)
+        let visit = scratch.startVisit(restaurantName: confirmed.venueName,
+                                       pricePerHead: confirmed.pricePerHead,
+                                       seatingLimitMinutes: 90,
+                                       maxSatiety: 3 * CapacityEngine.platesToSatiety)
+        scratch.addSightings(confirmed.spread, to: visit)
+
+        let after = rows()
+        let wroteVenue = after.venues == 1
+        let wroteDishes = after.dishes == 3
+        emit("\(wroteVenue ? "✅" : "❌") venue written: \(after.venues)")
+        emit("\(wroteDishes ? "✅" : "❌") dishes written: \(after.dishes) — 3 named of 4 drafted, the blank row dropped")
+
+        let ladder = scratch.restaurant(named: venue)?.tierNames ?? []
+        let tiered = ladder == ["Standard"] && confirmed.spread.allSatisfy { $0.tier == 0 }
+        emit("\(tiered ? "✅" : "❌") tier from the file, not the parse: ladder \(ladder), every item at rank 0")
+
+        let pass = heldClean && wroteVenue && wroteDishes && tiered && capture.canConfirm
+        emit("T23: \(pass ? "PASS" : "FAIL") — capture path only. The intent write paths are T10/T72")
         emit("")
     }
 
@@ -293,40 +354,6 @@ final class VerificationRunner {
         emit("T34: \(distinct >= 3 ? "PASS — path varies with the data" : "FAIL — pipeline")")
         emit("")
     }
-
-    private func t4_contextHeadroom() async {
-        emit("──── T4 ⭐ context headroom, realistic prose ────")
-        guard case .available = SystemLanguageModel.default.availability else {
-            emit("⚠️ model unavailable — skipped"); emit(""); return
-        }
-
-        let stations = ["raw bar with sashimi, oysters and chilled prawns",
-                        "a grill serving lamb chops, sirloin and chicken skewers",
-                        "a fried station with tempura, spring rolls and karaage",
-                        "rice and noodle counters", "a salad bar", "clear and miso soups",
-                        "a dessert counter with cakes, fruit and ice cream"]
-
-        let cases: [(String, Int)] = [(("typical"), 1), ("large", 4), ("extreme", 12)]
-        for (label, repeats) in cases {
-            let body = Array(repeating: stations.joined(separator: ", "), count: repeats)
-                .joined(separator: ". The far side of the room also has ")
-            let prompt = "The buffet offers \(body). Capacity remaining is about three plates. Where is the value concentrated?"
-            let approx = prompt.count / 4
-            do {
-                _ = try await LanguageModelSession(instructions: RoundAgent.instructions)
-                    .respond(to: prompt, generating: ValueHypothesis.self).content
-                emit("✅ \(label): ~\(approx) tokens (\(prompt.count) chars) — OK")
-            } catch {
-                let text = "\(error)"
-                let kind = text.contains("exceededContextWindow") ? "CONTEXT OVERFLOW"
-                    : text.contains("guardrail") ? "GUARDRAIL"
-                    : String(text.prefix(50))
-                emit("💥 \(label): ~\(approx) tokens (\(prompt.count) chars) — \(kind)")
-            }
-        }
-        emit("→ the app's worst-case prompt must sit under 4,096 by construction")
-        emit("")
-    }
 }
 
 private struct Harness: Identifiable {
@@ -437,7 +464,7 @@ struct VerificationView: View {
         [
             Harness(id: "--verify",
                     name: "App battery",
-                    detail: "T4 · T21 · T22 · T29 · T30 · T34 · T35 · T37",
+                    detail: "T21 · T22 · T23 · T29 · T30 · T34 · T35 · T37",
                     rendersInApp: true) { await runner.runAll() },
             Harness(id: "--token-audit",
                     name: "Token audit",

@@ -79,7 +79,13 @@ struct StartView: View {
         }
         .padding()
         .sheet(isPresented: $showingCapture) {
-            MenuCaptureView()
+            MenuCaptureView { menu in
+                model.startSession(restaurantName: menu.venueName,
+                                   pricePerHead: menu.pricePerHead,
+                                   seatingLimit: 90,
+                                   plates: 3,
+                                   spread: menu.spread)
+            }
         }
     }
 }

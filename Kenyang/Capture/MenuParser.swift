@@ -88,7 +88,12 @@ enum MenuParser {
 
         await progress(chunks.count, chunks.count)
         guard !collected.isEmpty else { throw Failure.nothingParsed }
-        return collected
+
+        let refinement = SectionClassifier.refined(collected)
+        CaptureLog.line("refined: \(refinement.raw) parsed → \(refinement.kept.count) kept, \(refinement.droppedAsHeading) dropped as heading")
+        guard !refinement.looksLikeContentsPage else { throw Failure.looksLikeContentsPage }
+        guard !refinement.kept.isEmpty else { throw Failure.nothingParsed }
+        return refinement.kept
     }
 
     private static func parseChunk(_ text: String) async throws -> [MenuItemDraft] {
@@ -102,13 +107,15 @@ enum MenuParser {
         do {
             return try await session.respond(to: prompt,
                                              generating: ParsedMenu.self,
-                                             options: GenerationOptions(maximumResponseTokens: 2000))
+                                             options: GenerationOptions(sampling: .greedy,
+                                                                        maximumResponseTokens: 2000))
                 .content.items
         } catch {
             guard case .transient = RoundAgent.classify(error) else { throw error }
             return try await session.respond(to: prompt,
                                              generating: ParsedMenu.self,
-                                             options: GenerationOptions(maximumResponseTokens: 2000))
+                                             options: GenerationOptions(sampling: .greedy,
+                                                                        maximumResponseTokens: 2000))
                 .content.items
         }
     }

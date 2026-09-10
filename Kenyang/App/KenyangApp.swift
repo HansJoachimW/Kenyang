@@ -23,6 +23,13 @@ struct KenyangApp: App {
                     let args = CommandLine.arguments
                     let all = args.contains("--run-all")
 
+                    // T53 — the capture pipeline against a real menu file. Takes a path,
+                    // so it is deliberately not part of --run-all.
+                    if let flag = args.firstIndex(of: "--capture-probe"), flag + 1 < args.count {
+                        await CaptureProbe.run(path: args[flag + 1])
+                        exit(0)
+                    }
+
                     if all || args.contains("--verify") {
                         let runner = VerificationRunner(store: store)
                         await runner.runAll()

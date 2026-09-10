@@ -25,7 +25,12 @@ enum SectionClassifier {
         guard !name.isEmpty else { return true }
         if name.count < 3 { return true }
         if name == normalised(item.printedSection) { return true }
-        return rules.contains { $0.terms.contains(name) }
+        // A bare keyword can be a heading ("SUSHI") or a real dish — "Karubi" and
+        // "Ramen" are both rule terms and both are on the menu. Printed menus set
+        // headings in capitals and OCR preserves case, so the two separate. Deleting
+        // a real dish is far worse than leaving a stray heading for review to remove.
+        let shouted = item.name == item.name.uppercased()
+        return shouted && rules.contains { $0.terms.contains(name) }
     }
 
     struct Refinement: Sendable {
@@ -47,10 +52,19 @@ enum SectionClassifier {
                 continue
             }
             var refined = item
+            // The heading is a fallback, not an authority. Flattening a 2D poster into
+            // one string misfiles headings freely — a real capture put "Rice & Noodle"
+            // under ‹APPETIZER & AGEMONO› — so a name that classifies itself outranks
+            // the heading it landed under. Only an unrecognisable name defers.
+            let nameSpeaksForItself = category(forSection: item.name) != nil
             if let fromSection = category(forSection: item.printedSection),
                fromSection != item.category {
-                CaptureLog.line("  recategorised: \"\(item.name)\" \(item.category.rawValue) → \(fromSection.rawValue) (heading ‹\(item.printedSection)›)")
-                refined.category = fromSection
+                if nameSpeaksForItself {
+                    CaptureLog.line("  kept \(item.category.rawValue) for \"\(item.name)\" — the name outranks heading ‹\(item.printedSection)› (\(fromSection.rawValue))")
+                } else {
+                    CaptureLog.line("  recategorised: \"\(item.name)\" \(item.category.rawValue) → \(fromSection.rawValue) (heading ‹\(item.printedSection)›)")
+                    refined.category = fromSection
+                }
             }
             result.kept.append(refined)
         }

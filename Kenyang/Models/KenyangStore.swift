@@ -48,6 +48,17 @@ final class KenyangStore {
         return created
     }
 
+    /// Records a menu tier against a venue and returns its rank in that venue's ladder.
+    /// Which menu you import *is* the tier, so rank is a venue-level fact rather than
+    /// something extracted per item. New tiers append, so import the base menu first.
+    func tierRank(of tierName: String, atRestaurantNamed name: String, pricePerHead: Double) -> Int {
+        let restaurant = findOrCreateRestaurant(named: name, pricePerHead: pricePerHead)
+        if let existing = restaurant.tierNames.firstIndex(of: tierName) { return existing }
+        restaurant.tierNames.append(tierName)
+        save()
+        return restaurant.tierNames.count - 1
+    }
+
     func exclusions() -> [String] {
         let descriptor = FetchDescriptor<DietaryExclusion>()
         return ((try? context.fetch(descriptor)) ?? []).map(\.term)
