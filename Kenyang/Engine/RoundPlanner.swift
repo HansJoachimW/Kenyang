@@ -35,7 +35,7 @@ struct PlannerObjective: Sendable {
 
 struct RoundPlanner {
     static let beamWidth = 24
-    static let maxItemsPerRound = 4
+    static let maxItems = 4
 
     static func plan(objective: PlannerObjective,
                      candidates: [DishSighting],
@@ -97,7 +97,7 @@ struct RoundPlanner {
 
         var beam: [[DishSighting]] = [[]]
 
-        for _ in 0..<maxItemsPerRound {
+        for _ in 0..<maxItems {
             var expanded: [(path: [DishSighting], score: Double)] = []
             for path in beam {
                 let used = path.reduce(0.0) { $0 + ValueEngine.satietyCost(for: $1) }

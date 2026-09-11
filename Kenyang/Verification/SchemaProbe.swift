@@ -15,8 +15,8 @@ import FoundationModels
 enum SchemaProbe {
 
     static let attempts = 12
-    static let minimumScorablePerBlock = 6
-    static let minimumScorableForRetry = 12
+    static let minPerBlock = 6
+    static let minForRetry = 12
 
     /// Isolates ONE variable: position in the process. Identical type, prompt,
     /// tools and instructions, three blocks back to back.
@@ -76,7 +76,7 @@ enum SchemaProbe {
             totalOK += ok
             totalScorable += scorable
 
-            if scorable >= minimumScorablePerBlock {
+            if scorable >= minPerBlock {
                 let rate = Int((Double(ok) / Double(scorable)) * 100)
                 rates.append(rate)
                 line("  → block \(block): \(ok)/\(scorable) scorable (\(rate)%)   "
@@ -101,7 +101,7 @@ enum SchemaProbe {
         let known = rates.compactMap { $0 }
         if known.count < 3 {
             line("→ INCONCLUSIVE — \(3 - known.count) block(s) had fewer than "
-                 + "\(minimumScorablePerBlock) scorable attempts. Fix the upstream failure first.")
+                 + "\(minPerBlock) scorable attempts. Fix the upstream failure first.")
         } else if totalOK == 0 {
             line("→ INCONCLUSIVE — nothing decoded in any block. A flat 0% is forced by the")
             line("  denominator, not observed; it is not evidence that position is irrelevant.")
@@ -195,7 +195,7 @@ enum SchemaProbe {
             for reason in excludedReasons.sorted() { line("     \(reason)") }
         }
 
-        guard scorable >= minimumScorableForRetry else {
+        guard scorable >= minForRetry else {
             line("")
             line("  INCONCLUSIVE — only \(scorable) of \(attempted) attempts tested the retry.")
             line("  A rate over this denominator would describe the excluded failures,")

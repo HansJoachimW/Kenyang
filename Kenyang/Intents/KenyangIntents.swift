@@ -52,6 +52,8 @@ struct StartSessionIntent: AppIntent {
     @Parameter(title: "Restaurant", default: "Demo Buffet")
     var restaurantName: String
 
+    // AppIntents requires a compile-time literal here, so these two cannot read
+    // SessionDefaults. Keep them in step with it by hand.
     @Parameter(title: "Price per head", default: 250_000)
     var pricePerHead: Double
 
@@ -68,7 +70,7 @@ struct StartSessionIntent: AppIntent {
         let visit = store.startVisit(restaurantName: restaurantName,
                                      pricePerHead: pricePerHead,
                                      seatingLimitMinutes: seatingLimit,
-                                     maxSatiety: 3 * CapacityEngine.platesToSatiety)
+                                     maxSatiety: SessionDefaults.maxSatiety)
         store.addSightings(DemoSpread.standard, to: visit)
         return .result(dialog: "Session started at \(restaurantName).")
     }

@@ -11,7 +11,7 @@ import Foundation
 enum SpotlightIndexer {
     @MainActor
     static func reindex(_ store: KenyangStore) async {
-        let ratings = store.ratingsByDishName()
+        let ratings = store.ratingsByDish()
         var seen: Set<String> = []
         let items = store.allSightings()
             .filter { seen.insert($0.name).inserted }

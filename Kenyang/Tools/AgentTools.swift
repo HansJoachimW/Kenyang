@@ -6,7 +6,7 @@ actor ToolContext {
 
     private(set) var sightings: [DishSighting] = []
     private(set) var events: [TasteEvent] = []
-    private(set) var capacity = CapacityState(maxSatiety: 9, spent: 0)
+    private(set) var capacity = CapacityState(maxSatiety: SessionDefaults.maxSatiety, spent: 0)
     private(set) var minutesRemaining: Int?
     private(set) var exclusions: [String] = []
     private(set) var basisRecords: [BasisRecord] = []

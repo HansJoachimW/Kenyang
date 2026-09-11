@@ -97,11 +97,23 @@ struct SatietyDiscount {
 }
 
 struct BreakEven {
+    /// Rupiah a single normal portion is worth at the bottom of the value scale, before
+    /// the category prior lifts it. A coarse à-la-carte anchor, not a measured price —
+    /// it only has to rank dishes consistently, and it cancels out of any comparison
+    /// between two of them.
+    static let baseRupiahPerPortion = 18_000.0
+
+    /// Floor under `priorValue` so a category the model rates at zero is still worth
+    /// something rather than free.
+    static let priorFloor = 0.2
+
+    static func rupiah(for category: MenuCategory) -> Double {
+        baseRupiahPerPortion * (category.priorValue + priorFloor)
+    }
+
     static func recovered(events: [TasteEvent], sightings: [DishSighting]) -> Double {
         events.reduce(0.0) { total, event in
-            let category = event.category
-            let unit = 18_000.0 * (category.priorValue + 0.2)
-            return total + unit * event.portion.multiplier
+            total + rupiah(for: event.category) * event.portion.multiplier
         }
     }
 
@@ -110,7 +122,7 @@ struct BreakEven {
                            expectedSatiety: Double) -> Double {
         guard !sightings.isEmpty else { return 0 }
         let bestDensity = sightings
-            .map { 18_000.0 * ($0.category.priorValue + 0.2) / ValueEngine.satietyCost(for: $0) }
+            .map { rupiah(for: $0.category) / ValueEngine.satietyCost(for: $0) }
             .sorted(by: >)
             .prefix(6)
         guard !bestDensity.isEmpty else { return 0 }

@@ -283,31 +283,28 @@ enum TokenAudit {
             line("  → this is the expected outcome, and it is what T50 exists to prove.")
         }
 
-        // The fallback the pass bar asks for.
+        // The fallback the pass bar asks for — measured through the path that SHIPS.
+        //
+        // This used to hand-roll its own chunk-by-category loop over a bare
+        // `respond(generating:)` with no GenerationOptions, which stopped resembling
+        // the app the moment MenuParser gained greedy sampling, a response-token cap,
+        // overlap dedupe and SectionClassifier refinement. A harness that audits a
+        // path nobody runs reports failures nobody has and misses the ones they do.
         line("")
-        line("attempting chunk-by-category (the fallback strategy)…")
+        line("attempting the app's own parse path (MenuParser)…")
+        let extracted = ExtractedText(text: menuText, source: .visionOCR, pages: 1)
         var returnedNames: [String] = []
-        var chunkFailures = 0
-        var mismatches: [String] = []
+        var parseFailed: String?
 
-        for (category, lines) in Fixtures.menuByCategory() {
-            let chunkPrompt = Fixtures.menuParsePrompt(lines.joined(separator: "\n"))
-            do {
-                let r = try await LanguageModelSession(instructions: Fixtures.menuParseInstructions)
-                    .respond(to: chunkPrompt, generating: ParsedMenu.self)
-                let out = r.content.items.map(\.name)
-                returnedNames += out
-                let matched = out.count == lines.count
-                if !matched {
-                    mismatches.append("\(category): \(lines.count) in, \(out.count) out")
-                }
-                line("  \(matched ? " " : "!") \(category.padded(to: 22)) "
-                     + "\(lines.count) in → \(out.count) out")
-            } catch {
-                chunkFailures += 1
-                line("  ✗ \(category.padded(to: 22)) FAILED — \(describe(error))")
-            }
+        let parseStarted = ContinuousClock.now
+        do {
+            returnedNames = try await MenuParser.parse(extracted).map(\.name)
+            line("  parsed in \(seconds(ContinuousClock.now - parseStarted))s")
+        } catch {
+            parseFailed = describe(error)
+            line("  FAILED — \(describe(error))")
         }
+
         let expected = Fixtures.menuByCategory().flatMap(\.1).map(normalised)
         let returned = returnedNames.map(normalised)
         let invented = Set(returned).subtracting(expected).sorted()
@@ -317,22 +314,23 @@ enum TokenAudit {
             .keys.sorted()
 
         line("")
-        line("  chunked total     : \(returnedNames.count) of \(Fixtures.menuItemCount) items")
-        line("  category failures : \(chunkFailures)")
-        line("  count mismatches  : \(mismatches.count)")
-        for m in mismatches { line("     \(m)") }
+        line("  returned          : \(returnedNames.count) of \(Fixtures.menuItemCount) items")
         if !invented.isEmpty {
             line("  INVENTED — returned but not printed on the menu: \(invented.joined(separator: ", "))")
         }
         if !missed.isEmpty {
-            line("  MISSED — printed but not returned: \(missed.joined(separator: ", "))")
+            line("  MISSED — printed but not returned: \(missed.count) item(s)")
+            line("     \(missed.prefix(12).joined(separator: ", "))\(missed.count > 12 ? " …" : "")")
+            line("     a miss is either the model omitting it or SectionClassifier dropping")
+            line("     it as heading-shaped — the [CAPTURE] lines above say which")
         }
         if !duplicated.isEmpty {
             line("  DUPLICATED: \(duplicated.joined(separator: ", "))")
         }
 
-        let faithful = chunkFailures == 0 && invented.isEmpty && missed.isEmpty && duplicated.isEmpty
-        line("  VERDICT: \(faithful ? "chunking WORKS — every printed item returned exactly once, nothing invented" : "chunking is NOT reliable — see the lines above")")
+        let faithful = parseFailed == nil && invented.isEmpty && missed.isEmpty && duplicated.isEmpty
+        line("  VERDICT: \(faithful ? "the shipping parse is faithful — every printed item returned exactly once, nothing invented" : "the shipping parse is NOT faithful — see the lines above")")
+        line("  → fidelity is what T50 measures now. Recall on a real photograph is T53.")
     }
 
     // MARK: - Output helpers

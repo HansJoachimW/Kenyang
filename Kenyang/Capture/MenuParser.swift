@@ -32,20 +32,25 @@ struct ParsedMenu: Sendable {
 }
 
 enum MenuParser {
-    static let charactersPerChunk = 1200
+    /// Coupled to `ParsedMenu.items`' `.maximumCount(40)`: a chunk that contains more
+    /// items than the schema can emit loses the remainder silently. Measured density
+    /// is ~15 characters per item on a dense printed menu and ~31 on real OCR text,
+    /// so 450 characters is at most ~30 items — under the cap with margin either way.
+    /// Raising this without raising the schema cap drops items on the floor (T50).
+    static let charactersPerChunk = 450
     static let maximumItems = 400
 
     enum Failure: LocalizedError {
         case modelUnavailable(String)
         case nothingParsed
-        case looksLikeContentsPage
+        case isContentsPage
 
         var errorDescription: String? {
             switch self {
             case .modelUnavailable(let reason): reason
             case .nothingParsed:
                 "Nothing on this page could be read as an item. The text may be too fragmented."
-            case .looksLikeContentsPage:
+            case .isContentsPage:
                 "This page lists sections, not dishes — headings like \"APPETIZER & AGEMONO\" with no item names under them. Photograph the pages that list individual items."
             }
         }
@@ -91,7 +96,7 @@ enum MenuParser {
 
         let refinement = SectionClassifier.refined(collected)
         CaptureLog.line("refined: \(refinement.raw) parsed → \(refinement.kept.count) kept, \(refinement.droppedAsHeading) dropped as heading")
-        guard !refinement.looksLikeContentsPage else { throw Failure.looksLikeContentsPage }
+        guard !refinement.isContentsPage else { throw Failure.isContentsPage }
         guard !refinement.kept.isEmpty else { throw Failure.nothingParsed }
         return refinement.kept
     }

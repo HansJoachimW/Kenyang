@@ -38,7 +38,7 @@ final class KenyangStore {
         return try? context.fetch(descriptor).first
     }
 
-    func findOrCreateRestaurant(named name: String, pricePerHead: Double) -> Restaurant {
+    func findOrCreate(named name: String, pricePerHead: Double) -> Restaurant {
         if let existing = restaurant(named: name) {
             existing.pricePerHead = pricePerHead
             return existing
@@ -51,8 +51,8 @@ final class KenyangStore {
     /// Records a menu tier against a venue and returns its rank in that venue's ladder.
     /// Which menu you import *is* the tier, so rank is a venue-level fact rather than
     /// something extracted per item. New tiers append, so import the base menu first.
-    func tierRank(of tierName: String, atRestaurantNamed name: String, pricePerHead: Double) -> Int {
-        let restaurant = findOrCreateRestaurant(named: name, pricePerHead: pricePerHead)
+    func tierRank(of tierName: String, venue name: String, pricePerHead: Double) -> Int {
+        let restaurant = findOrCreate(named: name, pricePerHead: pricePerHead)
         if let existing = restaurant.tierNames.firstIndex(of: tierName) { return existing }
         restaurant.tierNames.append(tierName)
         save()
@@ -135,7 +135,7 @@ final class KenyangStore {
 
     /// The most recent rating per dish, for entities that carry it into Spotlight
     /// and for `EntityPropertyQuery` filters like *dishes I rated good at Gyu-Kaku*.
-    func ratingsByDishName() -> [String: Rating] {
+    func ratingsByDish() -> [String: Rating] {
         let descriptor = FetchDescriptor<TasteEvent>(sortBy: [SortDescriptor(\.at, order: .forward)])
         let events = (try? context.fetch(descriptor)) ?? []
         return events.reduce(into: [:]) { latest, event in
@@ -148,7 +148,7 @@ final class KenyangStore {
                     pricePerHead: Double,
                     seatingLimitMinutes: Int?,
                     maxSatiety: Double) -> Visit {
-        let restaurant = findOrCreateRestaurant(named: restaurantName, pricePerHead: pricePerHead)
+        let restaurant = findOrCreate(named: restaurantName, pricePerHead: pricePerHead)
         let visit = Visit(restaurant: restaurant,
                           pricePerHead: pricePerHead,
                           seatingLimitMinutes: seatingLimitMinutes,

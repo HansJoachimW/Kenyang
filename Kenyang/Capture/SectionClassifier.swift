@@ -24,13 +24,18 @@ enum SectionClassifier {
         let name = normalised(item.name)
         guard !name.isEmpty else { return true }
         if name.count < 3 { return true }
-        if name == normalised(item.printedSection) { return true }
+        let isCategoryWord = rules.contains { $0.terms.contains(name) }
+        // The model often echoes an item's own name into its section field, and that
+        // is not evidence of a heading: "Chicken Nankotsu ‹Chicken Nankotsu›" is a
+        // dish. "Dessert ‹DESSERT›" is not — a real heading also reads as a category
+        // word. Echo alone deleted seven printed dishes (T50).
+        if name == normalised(item.printedSection) { return isCategoryWord }
         // A bare keyword can be a heading ("SUSHI") or a real dish — "Karubi" and
         // "Ramen" are both rule terms and both are on the menu. Printed menus set
         // headings in capitals and OCR preserves case, so the two separate. Deleting
         // a real dish is far worse than leaving a stray heading for review to remove.
         let shouted = item.name == item.name.uppercased()
-        return shouted && rules.contains { $0.terms.contains(name) }
+        return shouted && isCategoryWord
     }
 
     struct Refinement: Sendable {
@@ -38,7 +43,7 @@ enum SectionClassifier {
         var droppedAsHeading = 0
         var raw = 0
 
-        var looksLikeContentsPage: Bool {
+        var isContentsPage: Bool {
             raw >= 3 && Double(droppedAsHeading) / Double(raw) >= 0.6
         }
     }
@@ -56,10 +61,10 @@ enum SectionClassifier {
             // one string misfiles headings freely — a real capture put "Rice & Noodle"
             // under ‹APPETIZER & AGEMONO› — so a name that classifies itself outranks
             // the heading it landed under. Only an unrecognisable name defers.
-            let nameSpeaksForItself = category(forSection: item.name) != nil
+            let nameIsClear = category(forSection: item.name) != nil
             if let fromSection = category(forSection: item.printedSection),
                fromSection != item.category {
-                if nameSpeaksForItself {
+                if nameIsClear {
                     CaptureLog.line("  kept \(item.category.rawValue) for \"\(item.name)\" — the name outranks heading ‹\(item.printedSection)› (\(fromSection.rawValue))")
                 } else {
                     CaptureLog.line("  recategorised: \"\(item.name)\" \(item.category.rawValue) → \(fromSection.rawValue) (heading ‹\(item.printedSection)›)")
@@ -69,24 +74,6 @@ enum SectionClassifier {
             result.kept.append(refined)
         }
         return result
-    }
-
-    static func refine(_ items: [MenuItemDraft]) -> [MenuItemDraft] {
-        var kept: [MenuItemDraft] = []
-        for item in items {
-            guard !isLikelyHeading(item) else {
-                CaptureLog.line("  dropped as heading: \"\(item.name)\" ‹\(item.printedSection)›")
-                continue
-            }
-            var refined = item
-            if let fromSection = category(forSection: item.printedSection),
-               fromSection != item.category {
-                CaptureLog.line("  recategorised: \"\(item.name)\" \(item.category.rawValue) → \(fromSection.rawValue) (heading ‹\(item.printedSection)›)")
-                refined.category = fromSection
-            }
-            kept.append(refined)
-        }
-        return kept
     }
 
     private static func normalised(_ text: String) -> String {

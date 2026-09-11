@@ -53,7 +53,6 @@ struct SessionView: View {
 
 struct StartView: View {
     let model: SessionViewModel
-    @Environment(\.kenyangStore) private var store
     @State private var showingCapture = false
 
     var body: some View {
@@ -67,9 +66,9 @@ struct StartView: View {
                 .multilineTextAlignment(.center)
             Button("Start a demo session") {
                 model.startSession(restaurantName: "Demo Buffet",
-                                   pricePerHead: 250_000,
-                                   seatingLimit: 90,
-                                   plates: 3,
+                                   pricePerHead: SessionDefaults.pricePerHead,
+                                   seatingLimit: SessionDefaults.seatingMinutes,
+                                   plates: SessionDefaults.plates,
                                    spread: DemoSpread.standard)
             }
             .buttonStyle(.borderedProminent)
@@ -83,12 +82,9 @@ struct StartView: View {
             MenuCaptureView { menu in
                 model.startSession(restaurantName: menu.venueName,
                                    pricePerHead: menu.pricePerHead,
-                                   seatingLimit: 90,
-                                   plates: 3,
+                                   seatingLimit: SessionDefaults.seatingMinutes,
+                                   plates: SessionDefaults.plates,
                                    spread: menu.spread)
-                // A captured menu is the only thing that adds dishes, so it is the
-                // only moment the Spotlight index goes stale.
-                Task { await SpotlightIndexer.reindex(store) }
             }
         }
     }

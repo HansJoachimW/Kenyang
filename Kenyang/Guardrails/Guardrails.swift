@@ -114,7 +114,7 @@ struct StatisticalGuard {
 
 struct LoopBudget {
     var maxRounds: Int = 6
-    var maxModelCallsPerRound: Int = 6
+    var callBudget: Int = 6
     var wallClockLimit: TimeInterval = 20
     private(set) var roundsUsed = 0
     private(set) var callsThisRound = 0
@@ -125,7 +125,7 @@ struct LoopBudget {
     }
 
     mutating func consumeCall() -> Bool {
-        guard roundsUsed <= maxRounds, callsThisRound < maxModelCallsPerRound else { return false }
+        guard roundsUsed <= maxRounds, callsThisRound < callBudget else { return false }
         callsThisRound += 1
         return true
     }

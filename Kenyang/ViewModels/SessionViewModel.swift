@@ -38,7 +38,7 @@ final class SessionViewModel {
     }
 
     var capacity: CapacityState {
-        guard let visit else { return CapacityState(maxSatiety: 9, spent: 0) }
+        guard let visit else { return CapacityState(maxSatiety: SessionDefaults.maxSatiety, spent: 0) }
         return CapacityEngine.state(for: visit)
     }
 
@@ -67,6 +67,11 @@ final class SessionViewModel {
         self.visit = visit
         self.roundIndex = 1
         trace.clear()
+        // Starting a session is the only thing that adds dishes — from a captured
+        // menu or from the demo spread — so it is the one moment the Spotlight index
+        // goes stale. Hooking it to menu capture alone left a demo session unindexed
+        // until the next launch.
+        Task { await SpotlightIndexer.reindex(store) }
         Task { await planRound() }
     }
 

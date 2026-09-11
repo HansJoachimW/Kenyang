@@ -112,7 +112,7 @@ struct MenuItemEntityQuery: EntityStringQuery, EntityPropertyQuery {
 
     @MainActor
     func entities(for identifiers: [String]) async throws -> [MenuItemEntity] {
-        let ratings = store.ratingsByDishName()
+        let ratings = store.ratingsByDish()
         return identifiers.flatMap { store.sightings(named: $0).prefix(1) }
             .map { MenuItemEntity.from($0, rating: ratings[$0.name]) }
     }
@@ -161,7 +161,7 @@ struct MenuItemEntityQuery: EntityStringQuery, EntityPropertyQuery {
     /// everything known when no meal is running.
     @MainActor
     private func candidates() -> [MenuItemEntity] {
-        let ratings = store.ratingsByDishName()
+        let ratings = store.ratingsByDish()
         guard let visit = store.activeVisit(), !visit.sightings.isEmpty else { return everything() }
         return visit.sightings
             .map { MenuItemEntity.from($0, rating: ratings[$0.name]) }
@@ -170,7 +170,7 @@ struct MenuItemEntityQuery: EntityStringQuery, EntityPropertyQuery {
 
     @MainActor
     private func everything() -> [MenuItemEntity] {
-        let ratings = store.ratingsByDishName()
+        let ratings = store.ratingsByDish()
         var seen: Set<String> = []
         return store.allSightings()
             .filter { seen.insert($0.name).inserted }
