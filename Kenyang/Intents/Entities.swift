@@ -385,6 +385,28 @@ struct MenuCategoryEntityQuery: EntityStringQuery {
 
 // MARK: - Enums as parameters
 
+extension MealEnding: AppEnum {
+    nonisolated static var typeDisplayRepresentation: TypeDisplayRepresentation { "Reason" }
+    nonisolated static var caseDisplayRepresentations: [MealEnding: DisplayRepresentation] {
+        [.fullness: "I am full",
+         .clock:    "Seating time ran out",
+         .closing:  "The place is closing",
+         .left:     "The group left",
+         .unknown:  "Some other reason"]
+    }
+}
+
+extension Fullness: AppEnum {
+    nonisolated static var typeDisplayRepresentation: TypeDisplayRepresentation { "Fullness" }
+    nonisolated static var caseDisplayRepresentations: [Fullness: DisplayRepresentation] {
+        [.empty:       "Empty",
+         .light:       "Light",
+         .comfortable: "Comfortable",
+         .full:        "Full",
+         .stuffed:     "Stuffed"]
+    }
+}
+
 extension Rating: AppEnum {
     nonisolated static var typeDisplayRepresentation: TypeDisplayRepresentation { "Rating" }
     nonisolated static var caseDisplayRepresentations: [Rating: DisplayRepresentation] {

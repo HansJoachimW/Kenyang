@@ -130,6 +130,37 @@ enum RoundMove: String, Codable, CaseIterable, Sendable {
     case exploit, pivot
 }
 
+/// Why the meal actually ended — a record, not advice.
+///
+/// Distinct from `StopReason`, which is the guard telling the diner they *should* stop.
+/// This is what happened. The capacity fit depends on the difference: a meal that ended
+/// on `fullness` is an observation of capacity, and every other ending is only a lower
+/// bound on it.
+@Generable
+enum MealEnding: String, Codable, CaseIterable, Sendable {
+    case fullness, clock, closing, left, unknown
+
+    /// Only a `fullness` ending measures capacity. The rest say "at least this much".
+    var measuresCapacity: Bool { self == .fullness }
+}
+
+/// Five coarse states, spoken. `BUFFET.md` §6 — the output is a plate count, so
+/// precision past this is noise pretending to be signal.
+@Generable
+enum Fullness: String, Codable, CaseIterable, Sendable {
+    case empty, light, comfortable, full, stuffed
+
+    var level: Int {
+        switch self {
+        case .empty:       1
+        case .light:       2
+        case .comfortable: 3
+        case .full:        4
+        case .stuffed:     5
+        }
+    }
+}
+
 enum SessionOutcome: String, Codable, Sendable {
     case planning, running, stopped, declined
 }

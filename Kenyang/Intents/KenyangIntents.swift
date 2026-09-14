@@ -134,6 +134,131 @@ struct RecommendStopIntent: AppIntent {
     }
 }
 
+// MARK: - The table-side loop
+//
+// All three run with `openAppWhenRun = false`. That is the point: the phone is
+// face-down on the table with tongs in your hand, and an intent that opens the app is
+// a launcher, not an intent. Each one answers in its dialog, because with no screen
+// involved the dialog *is* the agent's output.
+
+struct LogEatenIntent: AppIntent {
+    static var title: LocalizedStringResource = "Log something I ate"
+    static var description = IntentDescription("Record a dish without opening the app. Rating it is optional.")
+    static var openAppWhenRun = false
+
+    // Left unresolved on purpose so the *system* asks which dish, rather than the app
+    // guessing from a near match.
+    @Parameter(title: "Dish")
+    var item: MenuItemEntity
+
+    @Parameter(title: "How was it?")
+    var rating: Rating?
+
+    @Parameter(title: "Portion", default: .normal)
+    var portion: PortionBucket
+
+    @Dependency private var store: KenyangStore
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Log \(\.$item)") {
+            \.$rating
+            \.$portion
+        }
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard let visit = store.activeVisit() else {
+            return .result(dialog: "No meal in progress. Start a session first.")
+        }
+        store.rate(dishName: item.name,
+                   category: item.category,
+                   rating: rating,
+                   portion: portion,
+                   in: visit,
+                   roundIndex: store.currentRound(in: visit))
+
+        // Every log runs the deterministic stop check (§3f).
+        let capacity = CapacityEngine.state(for: visit)
+        if StopGuard.shouldStop(capacity: capacity, minutesRemaining: visit.minutesRemaining) {
+            let reason = StopGuard.reason(capacity: capacity, minutesRemaining: visit.minutesRemaining)
+            return .result(dialog: IntentDialog(stringLiteral: StopGuard.message(for: reason)))
+        }
+        return .result(dialog: IntentDialog(stringLiteral: "Logged \(item.name). \(platesLeft(capacity))"))
+    }
+
+    private func platesLeft(_ capacity: CapacityState) -> String {
+        let plates = capacity.plateEstimate
+        if plates < 0.75 { return "About half a plate left." }
+        return "About \(String(format: "%.1f", plates)) plates left."
+    }
+}
+
+struct SetFullnessIntent: AppIntent {
+    static var title: LocalizedStringResource = "Say how full I am"
+    static var description = IntentDescription("Give the agent one coarse reading of how full you are.")
+    static var openAppWhenRun = false
+
+    @Parameter(title: "How full?")
+    var fullness: Fullness
+
+    @Dependency private var store: KenyangStore
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("I am \(\.$fullness)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard let visit = store.activeVisit() else {
+            return .result(dialog: "No meal in progress.")
+        }
+        store.recordFullness(fullness.level, in: visit)
+
+        // The reading is the diner's; the prediction is the app's. Saying which way they
+        // disagree is the app falsifying itself out loud — the second calibration axis.
+        let capacity = CapacityEngine.state(for: visit)
+        let predicted = CapacityEngine.predictedFullness(capacity)
+        let note: String
+        switch fullness.level - predicted {
+        case 2...:    note = "That is fuller than I expected — I will plan smaller rounds."
+        case ...(-2): note = "That is emptier than I expected — I had been too cautious."
+        default:      note = "That matches what I expected."
+        }
+        return .result(dialog: IntentDialog(stringLiteral: "Noted. \(note)"))
+    }
+}
+
+struct EndMealIntent: AppIntent {
+    static var title: LocalizedStringResource = "End the meal"
+    static var description = IntentDescription("Finish the meal and record why it ended.")
+    static var openAppWhenRun = false
+
+    // Not cosmetic. Only a `fullness` ending measures capacity; every other ending is a
+    // lower bound, and averaging the two biases the fit downward for ever (§3e).
+    @Parameter(title: "Why are you stopping?")
+    var reason: MealEnding
+
+    @Dependency private var store: KenyangStore
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("End the meal because \(\.$reason)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard let visit = store.activeVisit() else {
+            return .result(dialog: "No meal in progress.")
+        }
+        let eaten = visit.tasteEvents.count
+        store.endVisit(visit, outcome: .stopped, ending: reason)
+        let tail = reason.measuresCapacity
+            ? "That gives me a real reading on your capacity."
+            : "I will treat that as at least this much, not a full measurement."
+        return .result(dialog: IntentDialog(stringLiteral: "Meal ended after \(eaten) item\(eaten == 1 ? "" : "s"). \(tail)"))
+    }
+}
+
 struct PlanSnippet: View {
     let plan: RoundPlan
 
@@ -180,6 +305,22 @@ struct KenyangShortcuts: AppShortcutsProvider {
                               "Am I done in \(.applicationName)"],
                     shortTitle: "Should I stop",
                     systemImageName: "hand.raised")
+        AppShortcut(intent: LogEatenIntent(),
+                    phrases: ["Log a dish in \(.applicationName)",
+                              "I ate something in \(.applicationName)",
+                              "Log what I ate in \(.applicationName)"],
+                    shortTitle: "Log a dish",
+                    systemImageName: "fork.knife.circle")
+        AppShortcut(intent: SetFullnessIntent(),
+                    phrases: ["Set my fullness in \(.applicationName)",
+                              "Say how full I am in \(.applicationName)"],
+                    shortTitle: "How full I am",
+                    systemImageName: "gauge.medium")
+        AppShortcut(intent: EndMealIntent(),
+                    phrases: ["End the meal in \(.applicationName)",
+                              "I am done in \(.applicationName)"],
+                    shortTitle: "End the meal",
+                    systemImageName: "flag.checkered")
         AppShortcut(intent: StartSessionIntent(),
                     phrases: ["Start a buffet in \(.applicationName)",
                               "Start a session in \(.applicationName)"],

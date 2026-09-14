@@ -33,6 +33,8 @@ final class VerificationRunner {
         categoriesDecode()
         refusesBadImages()
         writesOnConfirm()
+        loggingSplitsLoops()
+        mealEndingRecorded()
         await entitiesResolve()
         excludedNeverPlanned()
         refusesOneSample()
@@ -178,6 +180,97 @@ final class VerificationRunner {
 
         let pass = heldClean && wroteVenue && wroteDishes && tiered && capture.canConfirm
         emit("nothing is written until you confirm: \(pass ? "PASS" : "FAIL") — capture path only.\n   The intent write paths are still uncovered (TESTS.md T10, T72)")
+        emit("")
+    }
+
+    private func loggingSplitsLoops() {
+        emit("──── logging and rating are separate loops ⭐  ·  TESTS.md T68 ────")
+        emit("Logging *that* you ate is a capacity observation. Logging *how good it was*")
+        emit("is a value observation. A blind log must move the first and not the second —")
+        emit("inventing a rating nobody gave is worse than having none (§3f).")
+
+        let scratch = KenyangStore(container: KenyangStore.makeContainer(inMemory: true))
+        let visit = scratch.startVisit(restaurantName: "Gyu-Kaku",
+                                       pricePerHead: SessionDefaults.pricePerHead,
+                                       seatingLimitMinutes: SessionDefaults.seatingMinutes,
+                                       maxSatiety: SessionDefaults.maxSatiety)
+        scratch.addSightings([(name: "Karubi", category: .meat, printed: "MEAT", tier: 0)], to: visit)
+
+        func value() -> DishPosterior {
+            ValueEngine.posterior(dishName: "Karubi", category: .meat, events: visit.tasteEvents)
+        }
+        func capacity() -> Double { CapacityEngine.state(for: visit).spent }
+
+        var checks: [(String, Bool)] = []
+
+        emit("")
+        emit("① a log with no rating")
+        scratch.rate(dishName: "Karubi", category: .meat, rating: nil,
+                     portion: .normal, in: visit, roundIndex: 1)
+        let blindCapacity = capacity()
+        let blindValue = value()
+        checks.append(("capacity moved", blindCapacity > 0))
+        checks.append(("value did NOT move", blindValue.sampleCount == 0))
+        emit("\(blindCapacity > 0 ? "✅" : "❌") capacity spent: \(String(format: "%.2f", blindCapacity))")
+        emit("\(blindValue.sampleCount == 0 ? "✅" : "❌") value samples: \(blindValue.sampleCount) — the rating was never given, so none was invented")
+
+        emit("")
+        emit("② the same dish, rated this time")
+        scratch.rate(dishName: "Karubi", category: .meat, rating: .good,
+                     portion: .normal, in: visit, roundIndex: 1)
+        let ratedCapacity = capacity()
+        let ratedValue = value()
+        checks.append(("capacity moved again", ratedCapacity > blindCapacity))
+        checks.append(("value moved once", ratedValue.sampleCount == 1))
+        emit("\(ratedCapacity > blindCapacity ? "✅" : "❌") capacity spent: \(String(format: "%.2f", ratedCapacity)) — both mouthfuls counted")
+        emit("\(ratedValue.sampleCount == 1 ? "✅" : "❌") value samples: \(ratedValue.sampleCount) of 2 events — only the rated one")
+
+        emit("")
+        for (label, passed) in checks { emit("\(passed ? "✅" : "❌") \(label)") }
+        let failures = checks.filter { !$0.1 }.count
+        emit("→ neither loop gates the other: you can log with tongs in your hand and")
+        emit("  rate later, or never")
+        emit("logging and rating are separate loops: \(failures == 0 ? "PASS" : "FAIL — \(failures) of \(checks.count) checks")")
+        emit("")
+    }
+
+    private func mealEndingRecorded() {
+        emit("──── the meal ending reaches the fit ⭐  ·  TESTS.md T72 ────")
+        emit("Only a `fullness` ending measures capacity. Every other ending is a lower")
+        emit("bound, and averaging the two biases the fit downward for ever.")
+
+        let scratch = KenyangStore(container: KenyangStore.makeContainer(inMemory: true))
+        var checks: [(String, Bool)] = []
+
+        for ending in MealEnding.allCases {
+            let visit = scratch.startVisit(restaurantName: "Gyu-Kaku \(ending.rawValue)",
+                                           pricePerHead: SessionDefaults.pricePerHead,
+                                           seatingLimitMinutes: SessionDefaults.seatingMinutes,
+                                           maxSatiety: SessionDefaults.maxSatiety)
+            scratch.endVisit(visit, outcome: .stopped, ending: ending)
+            let stored = visit.endedBecause == ending
+            checks.append(("\(ending.rawValue) survives the round trip", stored))
+            emit("  \(stored ? "✅" : "❌") \(ending.rawValue) → stored \(visit.endedBecause.rawValue) · measures capacity: \(ending.measuresCapacity)")
+        }
+
+        let measuring = MealEnding.allCases.filter(\.measuresCapacity)
+        let onlyFullness = measuring == [.fullness]
+        checks.append(("only fullness measures capacity", onlyFullness))
+        emit("")
+        emit("\(onlyFullness ? "✅" : "❌") endings that measure capacity: \(measuring.map(\.rawValue).joined(separator: ", "))")
+
+        // A visit that ends without a reason must not silently look like fullness.
+        let quiet = scratch.startVisit(restaurantName: "Quiet",
+                                       pricePerHead: SessionDefaults.pricePerHead,
+                                       seatingLimitMinutes: nil,
+                                       maxSatiety: SessionDefaults.maxSatiety)
+        scratch.endVisit(quiet, outcome: .stopped)
+        let defaultsSafe = quiet.endedBecause == .unknown && !quiet.endedBecause.measuresCapacity
+        checks.append(("an unrecorded ending defaults to unknown, not fullness", defaultsSafe))
+        emit("\(defaultsSafe ? "✅" : "❌") ended with no reason given → \(quiet.endedBecause.rawValue), excluded from the fit")
+
+        let failures = checks.filter { !$0.1 }.count
+        emit("the meal ending reaches the fit: \(failures == 0 ? "PASS" : "FAIL — \(failures) of \(checks.count) checks")")
         emit("")
     }
 

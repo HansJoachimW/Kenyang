@@ -171,10 +171,13 @@ final class KenyangStore {
         save()
     }
 
+    /// Record that a dish was eaten. `rating` is optional on purpose: logging *that*
+    /// you ate is a capacity observation and logging *how good it was* is a value
+    /// observation. They are separate loops and neither may gate the other (§3e).
     @discardableResult
     func rate(dishName: String,
               category: MenuCategory,
-              rating: Rating,
+              rating: Rating?,
               portion: PortionBucket,
               in visit: Visit,
               roundIndex: Int) -> TasteEvent {
@@ -187,6 +190,12 @@ final class KenyangStore {
         context.insert(event)
         save()
         return event
+    }
+
+    /// Rounds are not persisted, so the current one is the highest logged so far.
+    /// An intent fired from Siri has no view model to ask.
+    func currentRound(in visit: Visit) -> Int {
+        max(1, visit.tasteEvents.map(\.roundIndex).max() ?? 1)
     }
 
     func recordFullness(_ value: Int, in visit: Visit) {
@@ -204,9 +213,12 @@ final class KenyangStore {
         save()
     }
 
-    func endVisit(_ visit: Visit, outcome: SessionOutcome) {
+    /// `ending` is what the capacity fit reads: only a `fullness` ending is an
+    /// observation of capacity, and every other ending is a lower bound on it.
+    func endVisit(_ visit: Visit, outcome: SessionOutcome, ending: MealEnding = .unknown) {
         visit.endedAt = .now
         visit.outcome = outcome
+        visit.endedBecause = ending
         save()
     }
 

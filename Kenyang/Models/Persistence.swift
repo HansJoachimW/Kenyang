@@ -33,6 +33,9 @@ final class Visit {
     var pricePerHead: Double
     var declaredMaxSatiety: Double
     var outcomeRaw: String
+    /// Defaulted, because a renamed or undefaulted stored property crashes SwiftData
+    /// at launch rather than degrading — see the vocabulary-migration test.
+    var endedBecauseRaw: String = MealEnding.unknown.rawValue
     var restaurant: Restaurant?
 
     @Relationship(deleteRule: .cascade, inverse: \DishSighting.visit) var sightings: [DishSighting]
@@ -57,6 +60,11 @@ final class Visit {
     var outcome: SessionOutcome {
         get { SessionOutcome(rawValue: outcomeRaw) ?? .planning }
         set { outcomeRaw = newValue.rawValue }
+    }
+
+    var endedBecause: MealEnding {
+        get { MealEnding(rawValue: endedBecauseRaw) ?? .unknown }
+        set { endedBecauseRaw = newValue.rawValue }
     }
 
     var isActive: Bool { endedAt == nil }
@@ -116,19 +124,28 @@ final class TasteEvent {
     var dishName: String = ""
     var categoryRaw: String = MenuCategory.unknown.rawValue
     var ratingRaw: String
+    /// `false` when the diner logged *that* they ate something without saying how it
+    /// was. The satiety cost still counts — that is a capacity observation — but the
+    /// value posterior must ignore it, or a blind log fabricates a value observation,
+    /// which is worse than no observation at all (§3f, the Action Button rule).
+    /// Defaults to `true` so rows written before this existed keep their meaning.
+    var isRated: Bool = true
     var portionRaw: String
     var roundIndex: Int
     var visit: Visit?
 
     init(dishName: String,
          category: MenuCategory,
-         rating: Rating,
+         rating: Rating?,
          portion: PortionBucket,
          roundIndex: Int) {
         self.at = .now
         self.dishName = dishName
         self.categoryRaw = category.rawValue
-        self.ratingRaw = rating.rawValue
+        self.isRated = rating != nil
+        // An unrated log still needs *a* stored value; every value read filters on
+        // `isRated`, so this one is inert.
+        self.ratingRaw = (rating ?? .fine).rawValue
         self.portionRaw = portion.rawValue
         self.roundIndex = roundIndex
     }

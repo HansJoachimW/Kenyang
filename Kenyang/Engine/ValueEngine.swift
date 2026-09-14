@@ -16,7 +16,11 @@ struct ValueEngine {
     static func posterior(dishName: String,
                           category: MenuCategory,
                           events: [TasteEvent]) -> DishPosterior {
-        let matching = events.filter { $0.dishName.caseInsensitiveCompare(dishName) == .orderedSame }
+        // Only rated events carry value. An unrated log is a capacity observation and
+        // nothing more — counting it would invent a rating the diner never gave.
+        let matching = events.filter {
+            $0.isRated && $0.dishName.caseInsensitiveCompare(dishName) == .orderedSame
+        }
         let n = matching.count
         guard n > 0 else {
             return DishPosterior(dishName: dishName,
@@ -38,7 +42,7 @@ struct ValueEngine {
 
     static func categoryPosterior(_ category: MenuCategory,
                                  events: [TasteEvent]) -> DishPosterior {
-        let matching = events.filter { $0.category == category }
+        let matching = events.filter { $0.isRated && $0.category == category }
         let n = matching.count
         guard n > 0 else {
             return DishPosterior(dishName: category.label,
