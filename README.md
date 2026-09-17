@@ -25,56 +25,66 @@ Everything runs on device — the agent, the menu parse and the capacity model. 
 
 ## Layout
 
+*Generated from disk 2026-09-17.*
+
 ```
-Kenyang/
+Kenyang/Kenyang/
 ├── App/
-│   └── KenyangApp.swift          @main, container, AppDependencyManager,
-│                                 launch-argument harness dispatch
-├── Models/                       no behaviour beyond derivation
-│   ├── Domain.swift              closed-set enums, FlavourProfile, CapacityState
-│   ├── Persistence.swift         @Model entities + KenyangSchema
-│   └── KenyangStore.swift        the single data access point
+│   └── KenyangApp.swift             @main, container, AppDependencyManager, launch-argument dispatch
 │
-├── Engine/                       deterministic Swift — the model never computes
-│   ├── CapacityEngine.swift      satiety accounting, fullness prediction
-│   ├── ValueEngine.swift         posteriors, value density, satiety discount
-│   └── RoundPlanner.swift        bounded beam search
+├── Models/           no behaviour beyond derivation
+│   ├── Domain.swift                 closed-set enums, FlavourProfile, CapacityState, MealEnding
+│   ├── KenyangStore.swift           the single data access point
+│   ├── Persistence.swift            @Model entities + KenyangSchema
+│   └── SessionDefaults.swift        seed values for a meal, in one place
 │
-├── Agent/
-│   ├── AgentTypes.swift          @Generable contracts, TraceLog
-│   └── RoundAgent.swift          the state machine
+├── Engine/           deterministic Swift — the model never computes
+│   ├── CapacityEngine.swift         satiety accounting, fullness prediction
+│   ├── RoundPlanner.swift           bounded beam search
+│   └── ValueEngine.swift            posteriors, value density, satiety discount, break-even
+│
+├── Agent/            the agentic layer
+│   ├── AgentTypes.swift             @Generable contracts, TraceLog
+│   └── RoundAgent.swift             the state machine, retries, error classification
 │
 ├── Tools/
-│   └── AgentTools.swift          8 Tool conformances + ToolContext actor
+│   └── AgentTools.swift             8 Tool conformances + ToolContext actor
 │
 ├── Guardrails/
-│   └── Guardrails.swift          8 layers, each independently testable
+│   └── Guardrails.swift             the layers, each independently testable
 │
 ├── ViewModels/
-│   └── SessionViewModel.swift    @Observable, owns phase and session state
+│   └── SessionViewModel.swift       @Observable, owns phase and session state
 │
-├── Capture/                      Module A — menu ingest
-│   ├── MenuTextExtractor.swift   PDF text layer first, Vision OCR fallback
-│   ├── MenuParser.swift          @Generable ParsedMenu, chunked and retried
-│   ├── SectionClassifier.swift   heading → category, heading-as-item filter
-│   └── CaptureLog.swift          [CAPTURE] console trace
+├── Capture/          menu ingest
+│   ├── CaptureLog.swift             [CAPTURE] console trace
+│   ├── CaptureQualityGuard.swift    layer 0 — refuses an image it cannot read
+│   ├── MenuCaptureModel.swift       CapturedMenu + the capture view model
+│   ├── MenuDraft.swift              the editable row and the confirmed result
+│   ├── MenuParser.swift             @Generable ParsedMenu, 450-char chunks, greedy sampling
+│   ├── MenuTextExtractor.swift      PDF text layer → RecognizeDocumentsRequest → tiling
+│   └── SectionClassifier.swift      heading → category, heading-as-item filter
 │
 ├── Views/
-│   ├── SessionView.swift         Root, Start, Plan, Eating, Terminal, Trace
-│   ├── VerificationView.swift    the in-app battery
-│   ├── MenuCaptureView.swift     import → extract → parse → review
-│   └── Palette.swift             the six design tokens, light/dark
+│   ├── MenuCaptureView.swift        import → extract → parse → confirm
+│   ├── Palette.swift                the six design tokens, light/dark
+│   ├── SessionView.swift            Root, Start, Plan, Eating, Terminal, Trace
+│   └── VerificationView.swift       the harness menu — the only way to run on device
 │
-├── Intents/
-│   ├── Entities.swift            AppEntity + EntityQuery
-│   └── KenyangIntents.swift      intents, snippets, AppShortcutsProvider
+├── Intents/          the system-experience surface
+│   ├── Entities.swift               4 IndexedEntity types, EntityStringQuery, EntityPropertyQuery
+│   ├── KenyangIntents.swift         9 intents + the SnippetIntent, AppShortcutsProvider
+│   └── SpotlightIndexer.swift       indexAppEntities on launch and on session start
 │
-└── Verification/                 measurement harnesses — launch-argument driven
-    ├── TokenAudit.swift          context measurement via tokenCount
-    ├── SchemaProbe.swift         guided-generation failure, field order, retry
-    ├── StanceProbe.swift         prompt injection, grounding, volume framing
-    ├── GrowthAudit.swift         per-call-site token/latency/transcript budgets
-    └── AuditFixtures.swift       mid-meal state, 95-item synthetic menu
+└── Verification/     measurement harnesses — launch-argument driven
+    ├── AppBattery.swift             the 13 in-app checks
+    ├── AuditFixtures.swift          mid-meal state, 95-item synthetic menu
+    ├── CaptureProbe.swift           --capture-probe <file>, the capture path without UI
+    ├── GrowthAudit.swift            per-call-site token/latency/transcript budgets
+    ├── SchemaProbe.swift            schema, position and retry probes
+    ├── StanceProbe.swift            input trust, grounding, volume framing
+    └── TokenAudit.swift             the context audit via SystemLanguageModel.tokenCount
+└── Assets.xcassets
 ```
 
 **Code carries no comments by design.** This file is the explanation.
@@ -246,20 +256,60 @@ An incidental finding worth keeping: three failures began `DecisionB{"because": 
 
 ### Working
 
-Session start · spread capture · tool-calling agent · hypothesis with pre-registered expectation · round objective · beam-search planning · rating · capacity accounting · trace panel with computed-vs-model attribution · four App Intents with an entity, an interactive snippet and shortcut phrases.
+Session start · menu capture from a published file, confirmed before anything is written ·
+tool-calling agent · hypothesis with a pre-registered expectation · round objective ·
+beam-search planning · rating · capacity accounting · trace panel with computed-vs-model
+attribution · **nine App Intents** (seven with spoken phrases), four `IndexedEntity` types indexed into Spotlight,
+and an interactive snippet that rewrites itself in place.
+
+### Built but never exercised on device
+
+This is the distinction that matters, and it is the one an examiner probes. Everything in
+the list above is measured **in the app battery**, 13 checks. None of the following has
+been run by voice, by search, or with the app closed:
+
+* Siri resolving a spoken dish name — the risky one, and the same *confident-and-wrong*
+  failure shape that forced the scope narrowing on 2026-09-04
+* The registered phrases working with the app closed
+* Spotlight returning a dish rather than the app
+* The snippet redrawing in place rather than dismissing when Accept is tapped
 
 ### Known defects, ranked
 
-1. **The parse cannot report "there is nothing here."** Handed a menu contents page with no dish names, the model returned ten items, every one fabricated from a heading — it has an `unknown` case and never used it. A deterministic guard refuses the page instead, but the underlying behaviour stands.
-2. **`RoundDecision` decode failure** — 72–86% on the first attempt. The retry clears it to **0–8% effective**, and the residual degrades to the tool verdict rather than vanishing.
-3. **`CapacityEngine.fittedMax` fits on censored data** — see below. The app can detect that its capacity model is wrong and cannot yet learn from it.
-4. **`hypothesise` is close to its ceilings** — 2,023 of 2,200 tokens and 33 of 36 transcript entries, 92% of both. It is also the one call the diner waits on, at ~7.5 s.
-5. **`LoopBudget.wallClockLimit` is declared and never read** — layer 7 enforces call count only. Less urgent now a whole round is ~8.4 s, but still unenforced.
-6. **Capture is half built.** `Capture/` runs photo → OCR → parse → categorised list on device; nothing is persisted yet, so sessions still start from `DemoSpread`. Outstanding: geometry-aware extraction, multi-image accumulation, and the confirmation step.
-7. No Live Activity, Control Center control, widget, Focus filter or background task yet.
-8. Grill constraints — slots, cook time, plain-before-marinated — are designed, not implemented in `RoundPlanner`.
+1. **The exclusion guard empties every plan.** `DishSighting.ingredientsKnown` is never
+   set outside test fixtures, so a single dietary exclusion resolves every dish to
+   `unknown`, the planner filters to `safe` only, and the agent silently returns nothing.
+   The exclusion test passes because its fixtures set the flag by hand — the real path
+   cannot.
+2. **The planner budgets one portion and serves another.** The beam search costs
+   candidates at `.normal`; the emitted plan serves recon items at `.taste` (0.4×), and
+   at n = 0 every item is recon. A first round at a new venue under-delivers by ~60%.
+3. **Budget exhaustion is invisible in the trace.** Past round 6 every model call is
+   refused: the hypothesis falls back, the objective drops to balanced, the decision
+   returns unchanged — and none of it is recorded, in the panel four criteria rest on.
+4. **The parse cannot report "there is nothing here."** Handed a contents page, the model
+   fabricated ten items from headings. A deterministic guard now refuses such an image
+   before the model sees it, but the underlying behaviour stands.
+5. **`RoundDecision` decode failure** — ~20% on the first attempt. The retry clears it to
+   **5–13% effective** across three device runs, and the residual degrades to the tool
+   verdict rather than vanishing.
+6. **`CapacityEngine.fittedMax` fits on censored data** — see below. `Visit.endedBecause`
+   now records *why* a meal ended, so the input exists; the fit does not read it yet.
+7. **`LoopBudget.wallClockLimit` is declared and never read**, and `isExhausted` is never
+   read either. Layer 7 enforces call count only.
+8. **`hypothesise` is close to its ceilings** — 2,023 of 2,200 tokens and 33 of 36
+   transcript entries, 92% of both, at ~7 s on device.
+9. No Live Activity, Dynamic Island, Control Center control, widget, Focus filter or
+   background task. **There is no Widget Extension target**, so these are absent rather
+   than partial.
+10. Grill constraints — slots, cook time, plain-before-marinated — are designed, not
+    implemented in `RoundPlanner`.
 
-**Closed since the first draft of this file:** unbounded output *(now capped by `maximumResponseTokens`)*; latency *(the Simulator was pessimistic by ~3×; a round is ~8.4 s then ~3.4 s on device)*; the menu-parse fidelity defect *(96 returned from 95 — did not reproduce, and the assertion now compares names rather than counts, so a recurrence is visible)*.
+**Closed since the first draft:** unbounded output *(capped by `maximumResponseTokens`)*;
+latency *(the Simulator was pessimistic by ~3×; a round is ~8.4 s then ~3.4 s on device)*;
+menu-parse fidelity *(now 95/95 through the shipping parser, measured, nothing invented)*;
+capture persistence *(a confirmed menu starts a session)*; the volume-framing false
+positive *(the test was wrong, not the guard)*.
 
 ### The capacity model has a defect that would not announce itself
 
@@ -269,8 +319,12 @@ Session start · spread capture · tool-calling agent · hypothesis with pre-reg
 
 ### Agency level
 
-Deliberately not claimed here yet. What is measured: the agent composes rather than selects its hypothesis, path length varies with the data, tool verdicts bind, and it can decline the premise — but `exploit` is chosen ~92% of the time, and the 20-scenario branch-selection battery has not been run. **The level claim waits on that measurement.** Overclaiming is the fastest way to lose credibility with anyone who probes.
-
+Deliberately not claimed. What is measured: the agent composes rather than selects its
+hypothesis, path length varies with the data, tool verdicts bind, the consistency guard
+has been caught overriding the model, and it can decline the premise outright. Against
+that, `exploit` is chosen 74–92% depending on the run, **and the 20-scenario
+branch-selection battery has still not been run.** The level claim waits on that
+measurement. Overclaiming is the fastest way to lose anyone who probes.
 ---
 
 ## A note on the palette
