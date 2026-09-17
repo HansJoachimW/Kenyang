@@ -192,6 +192,19 @@ final class KenyangStore {
         return event
     }
 
+    /// The plan the agent last produced, so a snippet can re-render itself without
+    /// paying for another round of model calls. In memory only — if the process was
+    /// relaunched between taps the snippet says so rather than inventing a plan.
+    var lastPlan: RoundPlan?
+
+    /// Accepting a round is the diner agreeing to eat it. `running` was already in
+    /// `SessionOutcome` and unused, so this needs no schema change — and a schema
+    /// change on submission day is not a risk worth taking.
+    func acceptRound(_ visit: Visit) {
+        visit.outcome = .running
+        save()
+    }
+
     /// Rounds are not persisted, so the current one is the highest logged so far.
     /// An intent fired from Siri has no view model to ask.
     func currentRound(in visit: Visit) -> Int {

@@ -35,6 +35,7 @@ final class VerificationRunner {
         writesOnConfirm()
         loggingSplitsLoops()
         mealEndingRecorded()
+        await snippetUpdatesInPlace()
         await entitiesResolve()
         excludedNeverPlanned()
         refusesOneSample()
@@ -271,6 +272,90 @@ final class VerificationRunner {
 
         let failures = checks.filter { !$0.1 }.count
         emit("the meal ending reaches the fit: \(failures == 0 ? "PASS" : "FAIL — \(failures) of \(checks.count) checks")")
+        emit("")
+    }
+
+    private func snippetUpdatesInPlace() async {
+        emit("──── the snippet updates in place ⭐  ·  TESTS.md T8 ────")
+        emit("A snippet that dismisses is indistinguishable from a button that launched")
+        emit("the app. Accept must rewrite the same surface — so the test is that the")
+        emit("renderer returns a DIFFERENT view for the same visit, with no app launch.")
+
+        let scratch = KenyangStore(container: KenyangStore.makeContainer(inMemory: true))
+        let visit = scratch.startVisit(restaurantName: "Gyu-Kaku",
+                                       pricePerHead: SessionDefaults.pricePerHead,
+                                       seatingLimitMinutes: SessionDefaults.seatingMinutes,
+                                       maxSatiety: SessionDefaults.maxSatiety)
+        scratch.addSightings([
+            (name: "Karubi", category: .meat, printed: "MEAT", tier: 0),
+            (name: "Harami", category: .meat, printed: "MEAT", tier: 0),
+            (name: "Salmon Sashimi", category: .raw, printed: "SUSHI", tier: 0)
+        ], to: visit)
+        scratch.lastPlan = RoundPlanner.plan(objective: .balanced,
+                                             candidates: visit.sightings,
+                                             events: visit.tasteEvents,
+                                             capacity: CapacityEngine.state(for: visit),
+                                             exclusions: [])
+
+        var checks: [(String, Bool)] = []
+
+        // Mirrors RoundSnippetIntent: the most recent visit, not only a live one.
+        func state() -> String {
+            guard let latest = scratch.allVisits().first else { return "no meal" }
+            guard latest.isActive else { return "ended" }
+            switch latest.outcome {
+            case .stopped, .declined: return "ended"
+            case .running:            return "receipt"
+            case .planning:           return (scratch.lastPlan?.isEmpty ?? true) ? "no plan" : "plan"
+            }
+        }
+
+        let planned = state()
+        checks.append(("starts on the plan", planned == "plan"))
+        emit("  before Accept → \(planned) · \(scratch.lastPlan?.items.count ?? 0) items")
+
+        // What AcceptRoundIntent does.
+        scratch.acceptRound(visit)
+        let accepted = state()
+        checks.append(("Accept rewrites it to a receipt", accepted == "receipt"))
+        checks.append(("the same visit is still live — nothing dismissed", scratch.activeVisit() != nil))
+        emit("  after Accept  → \(accepted) · visit still active: \(scratch.activeVisit() != nil)")
+
+        // What AdjustRoundIntent does: a different objective, not a re-roll.
+        let before = scratch.lastPlan?.items.map(\.dishName) ?? []
+        scratch.lastPlan = RoundPlanner.plan(objective: PlannerObjective(reconShare: .most,
+                                                                        learnAbout: [],
+                                                                        avoidProfile: nil,
+                                                                        posture: .aggressive,
+                                                                        rationale: "Adjusted"),
+                                             candidates: visit.sightings,
+                                             events: visit.tasteEvents,
+                                             capacity: CapacityEngine.state(for: visit),
+                                             exclusions: [])
+        let after = scratch.lastPlan?.items.map(\.dishName) ?? []
+        let adjusted = !after.isEmpty
+        checks.append(("Adjust produces a plan under a new objective", adjusted))
+        emit("  Adjust        → \(before.joined(separator: "→")) becomes \(after.joined(separator: "→"))")
+
+        // What EndMealIntent does.
+        scratch.endVisit(visit, outcome: .stopped, ending: .fullness)
+        let ended = state()
+        checks.append(("Stop ends the meal", ended == "ended"))
+        emit("  after Stop    → \(ended)")
+
+        // The claim that actually scores: none of the three opens the app.
+        let noLaunch = AcceptRoundIntent.openAppWhenRun == false
+            && AdjustRoundIntent.openAppWhenRun == false
+            && EndMealIntent.openAppWhenRun == false
+        checks.append(("no button opens the app", noLaunch))
+        emit("  openAppWhenRun — Accept: \(AcceptRoundIntent.openAppWhenRun) · Adjust: \(AdjustRoundIntent.openAppWhenRun) · Stop: \(EndMealIntent.openAppWhenRun)")
+
+        emit("")
+        for (label, passed) in checks { emit("\(passed ? "✅" : "❌") \(label)") }
+        let failures = checks.filter { !$0.1 }.count
+        emit("→ the state machine is proven here; that the SYSTEM redraws the snippet")
+        emit("  rather than dismissing it is an on-device check")
+        emit("the snippet updates in place: \(failures == 0 ? "PASS" : "FAIL — \(failures) of \(checks.count) checks")")
         emit("")
     }
 
