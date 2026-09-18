@@ -25,8 +25,12 @@ final class RoundAgent {
     private let trace: TraceLog
     private var budget = LoopBudget()
 
-    init(trace: TraceLog) {
+    /// The budget is injectable so the battery can exhaust it without waiting six real
+    /// rounds for the model. Same reason `MenuItemEntityQuery` takes a store: a check
+    /// that can be written but never run is the failure `TESTS.md` exists to prevent.
+    init(trace: TraceLog, budget: LoopBudget = LoopBudget()) {
         self.trace = trace
+        self.budget = budget
     }
 
     func run(_ input: AgentInput) async -> AgentOutcome {
@@ -67,6 +71,14 @@ final class RoundAgent {
                          deterministic: true)
             return .degraded(plan, availability.explanation)
         }
+
+        // Which guarantees are actually in force this run. The agent behaves the same
+        // either way; what changes is whether "you must call the tools" is a sentence
+        // in the instructions or a refusal from the framework.
+        trace.record(kind: .guardrail,
+                     title: "model tier",
+                     detail: AgentCapabilities.summary,
+                     deterministic: true)
 
         await ToolContext.shared.resetInvocations()
         await ToolContext.shared.load(sightings: input.sightings,
@@ -113,10 +125,23 @@ final class RoundAgent {
         return .planned(plan, hypothesis, structured)
     }
 
+    /// Every model call passes through here so a refused one leaves a mark. A budget
+    /// that silently stops the agent past round 6 — hypothesis falls back, objective
+    /// drops to balanced, decision returns unchanged — reads in the trace panel exactly
+    /// like an agent that chose all three, which is the opposite of what happened.
+    private func consume(_ label: String) -> Bool {
+        guard let refusal = budget.consumeCall() else { return true }
+        trace.record(kind: .guardrail,
+                     title: "loop budget",
+                     detail: "\(label) refused — \(refusal.rawValue) (\(budget.spentDescription)). Falling back to the deterministic path.",
+                     deterministic: true)
+        return false
+    }
+
     private func hypothesise(input: AgentInput, excluding dead: MenuCategory? = nil) async -> ValueHypothesis? {
-        guard budget.consumeCall() else { return nil }
-        let session = LanguageModelSession(tools: AgentToolbox.readTools,
-                                           instructions: Self.instructions)
+        guard consume("hypothesise") else { return nil }
+        let session = AgentCapabilities.session(tools: AgentToolbox.readTools,
+                                                instructions: Self.instructions)
         do {
             let exclusion = dead.map {
                 "\nThe \($0.rawValue) has already been FALSIFIED by the ratings. Do not choose it again — name a different category."
@@ -129,7 +154,7 @@ final class RoundAgent {
                         is concentrated and what rating you expect from that category.\(exclusion)
                         """,
                     generating: ValueHypothesis.self,
-                    options: Self.bounded(300)
+                    options: AgentCapabilities.toolBound(300)
                 ).content
             }
 
@@ -165,7 +190,7 @@ final class RoundAgent {
     }
 
     private func decide(_ hypothesis: ValueHypothesis, input: AgentInput) async -> ValueHypothesis {
-        guard budget.consumeCall() else { return hypothesis }
+        guard consume("decide") else { return hypothesis }
 
         let verdict = deterministicVerdict(hypothesis, events: input.events)
         trace.record(kind: .verdict,
@@ -173,8 +198,8 @@ final class RoundAgent {
                      detail: "\(hypothesis.category.rawValue) → \(verdict.rawValue)",
                      deterministic: true)
 
-        let session = LanguageModelSession(tools: AgentToolbox.readTools,
-                                           instructions: Self.instructions)
+        let session = AgentCapabilities.session(tools: AgentToolbox.readTools,
+                                                instructions: Self.instructions)
         do {
             let decision = try await retrying("decide") {
                 try await session.respond(
@@ -185,7 +210,7 @@ final class RoundAgent {
                         remaining budget can still be trusted. Then decide.
                         """,
                     generating: RoundDecision.self,
-                    options: Self.bounded(250)
+                    options: AgentCapabilities.toolBound(250)
                 ).content
             }
 
@@ -235,19 +260,19 @@ final class RoundAgent {
     }
 
     private func setIntent(hypothesis: ValueHypothesis, input: AgentInput) async -> RoundIntent? {
-        guard budget.consumeCall() else { return nil }
+        guard consume("setIntent") else { return nil }
         let names = input.sightings.map(\.name).joined(separator: ", ")
-        let session = LanguageModelSession(instructions: Self.instructions)
+        let session = AgentCapabilities.session(instructions: Self.instructions)
         do {
             var intent = try await retrying("setIntent", narrowed: {
-                try await LanguageModelSession(instructions: Self.instructions).respond(
+                try await AgentCapabilities.session(instructions: Self.instructions).respond(
                     to: """
                         Round \(input.roundIndex). Capacity left: about \
                         \(String(format: "%.1f", input.capacity.plateEstimate)) plates.
                         Set the objective for this round. Leave learnAbout empty.
                         """,
                     generating: RoundIntent.self,
-                    options: Self.bounded(400)
+                    options: AgentCapabilities.bounded(400)
                 ).content
             }) {
                 try await session.respond(
@@ -259,7 +284,7 @@ final class RoundAgent {
                         Set the objective for this round.
                         """,
                     generating: RoundIntent.self,
-                    options: Self.bounded(400)
+                    options: AgentCapabilities.bounded(400)
                 ).content
             }
 
@@ -296,7 +321,7 @@ final class RoundAgent {
         } catch {
             switch Self.classify(error) {
             case .transient:
-                guard budget.consumeCall() else { throw error }
+                guard consume("\(label) retry") else { throw error }
                 trace.record(kind: .modelFailure,
                              title: "retry",
                              detail: "\(label): \(Self.describe(error)) — retrying once",
@@ -304,7 +329,7 @@ final class RoundAgent {
                 return try await body()
 
             case .overflow:
-                guard let narrowed, budget.consumeCall() else {
+                guard let narrowed, consume("\(label) narrowed retry") else {
                     trace.record(kind: .modelFailure,
                                  title: "context overflow",
                                  detail: "\(label): the window filled during generation and there is no narrower request to fall back to.",
@@ -321,10 +346,6 @@ final class RoundAgent {
                 throw error
             }
         }
-    }
-
-    private static func bounded(_ tokens: Int) -> GenerationOptions {
-        GenerationOptions(maximumResponseTokens: tokens)
     }
 
     nonisolated static func classify(_ error: Error) -> GenerationFailure {
@@ -383,9 +404,24 @@ final class RoundAgent {
     }
 
     private func describe(_ plan: RoundPlan) -> String {
-        guard !plan.isEmpty else { return "no plannable dishes" }
-        return plan.items.map { "\($0.dishName) (\($0.isRecon ? "recon" : "exploit"), \($0.portion.rawValue))" }
-            .joined(separator: " → ")
+        var parts: [String] = []
+        if plan.isEmpty {
+            parts.append(plan.hasUnresolvedDishes
+                ? "no plannable dishes — every remaining dish needs its ingredients checked"
+                : "no plannable dishes")
+        } else {
+            parts.append(plan.items
+                .map { "\($0.dishName) (\($0.isRecon ? "recon" : "exploit"), \($0.portion.rawValue))" }
+                .joined(separator: " → "))
+            parts.append("costs \(String(format: "%.2f", plan.totalSatietyCost)) satiety")
+        }
+        if plan.excludedCount > 0 {
+            parts.append("\(plan.excludedCount) ruled out by the exclusion list")
+        }
+        if plan.hasUnresolvedDishes {
+            parts.append("ask staff about: \(plan.deferToStaff.joined(separator: ", "))")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private static func describe(_ error: Error) -> String {

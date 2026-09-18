@@ -2,14 +2,49 @@ import Foundation
 import FoundationModels
 
 struct ExclusionValidator {
+    /// The verdict is reached per exclusion term, and the strictest one wins. A term is
+    /// resolved three ways: the printed name settles it, a known ingredient list settles
+    /// it, or the diner settles it after asking staff. Anything left unresolved makes
+    /// the whole dish `unknown` — one open question is enough.
     static func verdict(for sighting: DishSighting, exclusions: [String]) -> ExclusionVerdict {
-        guard !exclusions.isEmpty else { return .safe }
-        guard sighting.ingredientsKnown else { return .unknown }
-        let haystack = (sighting.ingredients + [sighting.name]).map { $0.lowercased() }
-        for term in exclusions.map({ $0.lowercased() }) where !term.isEmpty {
-            if haystack.contains(where: { $0.contains(term) }) { return .excluded }
+        let terms = normalised(exclusions)
+        guard !terms.isEmpty else { return .safe }
+
+        let name = sighting.name.lowercased()
+        let listed = sighting.ingredients.map { $0.lowercased() }
+        let cleared = Set(normalised(sighting.clearedTerms))
+
+        var unresolved = false
+        for term in terms {
+            // The printed name is evidence in its own right. "Prawn Tempura" against an
+            // exclusion of *prawn* is determinable with no ingredient list at all, and
+            // checking it only after `ingredientsKnown` meant the one dish the app could
+            // rule out for free came back `unknown`.
+            if name.contains(term) { return .excluded }
+            if listed.contains(where: { $0.contains(term) }) { return .excluded }
+            if sighting.ingredientsKnown { continue }
+            if cleared.contains(term) { continue }
+            unresolved = true
         }
-        return .safe
+        return unresolved ? .unknown : .safe
+    }
+
+    /// The terms this dish still has no answer for — what the diner would have to ask
+    /// staff about, and nothing more. Asking about a term already settled by the name
+    /// or by a previous answer wastes the one thing the app is short of: the diner's
+    /// patience mid-meal.
+    static func unresolvedTerms(for sighting: DishSighting, exclusions: [String]) -> [String] {
+        guard verdict(for: sighting, exclusions: exclusions) == .unknown else { return [] }
+        let cleared = Set(normalised(sighting.clearedTerms))
+        let name = sighting.name.lowercased()
+        return normalised(exclusions).filter { term in
+            !cleared.contains(term) && !name.contains(term)
+        }
+    }
+
+    private static func normalised(_ terms: [String]) -> [String] {
+        terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
     }
 
     static func partition(_ sightings: [DishSighting],
@@ -113,24 +148,43 @@ struct StatisticalGuard {
 }
 
 struct LoopBudget {
+    /// Why a call was refused. A refusal used to be a bare `false`, which meant the
+    /// agent quietly fell back to deterministic defaults and the trace panel — the one
+    /// four criteria rest on — showed nothing at all. A budget that stops the agent
+    /// without saying so is indistinguishable from an agent that had nothing to say.
+    enum Refusal: String, Sendable {
+        case roundsExhausted    = "the round budget is spent"
+        case callsExhausted     = "the call budget for this round is spent"
+        case wallClockExpired   = "this round passed its wall-clock limit"
+    }
+
     var maxRounds: Int = 6
     var callBudget: Int = 6
     var wallClockLimit: TimeInterval = 20
     private(set) var roundsUsed = 0
     private(set) var callsThisRound = 0
+    private var roundStartedAt: Date = .now
 
     mutating func beginRound() {
         roundsUsed += 1
         callsThisRound = 0
+        roundStartedAt = .now
     }
 
-    mutating func consumeCall() -> Bool {
-        guard roundsUsed <= maxRounds, callsThisRound < callBudget else { return false }
+    /// `nil` means the call may proceed. Anything else is the reason it may not.
+    mutating func consumeCall(now: Date = .now) -> Refusal? {
+        if roundsUsed > maxRounds { return .roundsExhausted }
+        if callsThisRound >= callBudget { return .callsExhausted }
+        if now.timeIntervalSince(roundStartedAt) > wallClockLimit { return .wallClockExpired }
         callsThisRound += 1
-        return true
+        return nil
     }
 
     var isExhausted: Bool { roundsUsed > maxRounds }
+
+    var spentDescription: String {
+        "round \(roundsUsed)/\(maxRounds), call \(callsThisRound)/\(callBudget)"
+    }
 }
 
 struct AskBudget {

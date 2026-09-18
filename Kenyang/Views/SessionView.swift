@@ -138,12 +138,14 @@ struct PlanView: View {
                 }
             }
             if !model.unknownDishes.isEmpty {
-                Section("Held back") {
+                Section {
                     ForEach(model.unknownDishes, id: \.name) { dish in
-                        Label("\(dish.name) — ingredients unknown, ask staff",
-                              systemImage: "questionmark.circle")
-                            .font(.footnote)
+                        HeldBackRow(model: model, dish: dish)
                     }
+                } header: {
+                    Text("Held back")
+                } footer: {
+                    Text("Kenyang will not guess an ingredient list. Ask staff, then answer here and the dish rejoins the round.")
                 }
             }
             Section {
@@ -151,6 +153,31 @@ struct PlanView: View {
                 Button("Stop here") { model.endSession() }
             }
         }
+    }
+}
+
+/// One undeterminable dish, with a yes/no per open exclusion term. The question is put
+/// to the diner, never to the model — an ingredient list is a fact about a kitchen, and
+/// the app has no way to observe one.
+struct HeldBackRow: View {
+    let model: SessionViewModel
+    let dish: DishSighting
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(dish.name, systemImage: "questionmark.circle").font(.subheadline)
+            ForEach(model.openQuestions(for: dish), id: \.self) { term in
+                HStack {
+                    Text("Contains \(term)?").font(.footnote).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("No")  { Task { await model.answer(term, contains: false, for: dish) } }
+                    Button("Yes") { Task { await model.answer(term, contains: true,  for: dish) } }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 

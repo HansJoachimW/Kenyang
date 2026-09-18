@@ -112,14 +112,14 @@ enum MenuParser {
         do {
             return try await session.respond(to: prompt,
                                              generating: ParsedMenu.self,
-                                             options: GenerationOptions(sampling: .greedy,
+                                             options: GenerationOptions(samplingMode: .greedy,
                                                                         maximumResponseTokens: 2000))
                 .content.items
         } catch {
             guard case .transient = RoundAgent.classify(error) else { throw error }
             return try await session.respond(to: prompt,
                                              generating: ParsedMenu.self,
-                                             options: GenerationOptions(sampling: .greedy,
+                                             options: GenerationOptions(samplingMode: .greedy,
                                                                         maximumResponseTokens: 2000))
                 .content.items
         }

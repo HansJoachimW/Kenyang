@@ -54,6 +54,29 @@ final class SessionViewModel {
         return ExclusionValidator.partition(visit.sightings, exclusions: store.exclusions()).excluded.count
     }
 
+    /// What is still open, dish by dish and term by term. Driving the UI off this
+    /// rather than off `unknownDishes` means a dish disappears from the list the moment
+    /// its last question is answered.
+    func openQuestions(for sighting: DishSighting) -> [String] {
+        ExclusionValidator.unresolvedTerms(for: sighting, exclusions: store.exclusions())
+    }
+
+    /// The diner asked staff and came back with an answer. Re-planning afterwards is
+    /// the point: a dish cleared mid-round should become plannable in that round, not
+    /// the next one.
+    func answer(_ term: String, contains: Bool, for sighting: DishSighting) async {
+        if contains {
+            store.flagExclusion(term, for: sighting)
+        } else {
+            store.clearExclusion(term, for: sighting)
+        }
+        trace.record(kind: .guardrail,
+                     title: "exclusion resolved",
+                     detail: "\(sighting.name) · \(term) → \(contains ? "contains it" : "cleared by the diner")",
+                     deterministic: true)
+        await planRound()
+    }
+
     func startSession(restaurantName: String,
                       pricePerHead: Double,
                       seatingLimit: Int?,

@@ -133,7 +133,14 @@ struct VerificationView: View {
             Harness(id: "--retry-probe",
                     name: "Retry probe",
                     detail: "Does one retry clear the decode failure?",
-                    rendersInApp: false) { await SchemaProbe.retryProbe() }
+                    rendersInApp: false) { await SchemaProbe.retryProbe() },
+            Harness(id: "--branch-battery",
+                    name: "Branch battery (TB)",
+                    detail: "20 scenarios — does the move track the verdict, or collapse?",
+                    rendersInApp: false) {
+                        BranchBattery.stopIsDeterministic()
+                        await BranchBattery.run()
+                    }
         ]
     }
 

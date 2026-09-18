@@ -14,9 +14,24 @@ struct RoundPlan: Sendable {
     var rationale: String
     var reconShare: ReconShare
     var posture: Posture
+
+    /// Dishes whose ingredients the app could not determine. A binary validator fails
+    /// open and calls these *safe*; this one refuses to plan them — but refusing is
+    /// only half the job. Silently dropping them is what made a single exclusion empty
+    /// every plan with no explanation, so they leave the planner by name and the
+    /// surfaces above ask staff about them.
+    var deferToStaff: [String] = []
+
+    /// How many dishes the exclusion list ruled out outright. Counted, not named: the
+    /// list is an input and the app never explains why something is on it.
+    var excludedCount: Int = 0
+
     var totalSatietyCost: Double { items.reduce(0) { $0 + $1.satietyCost } }
     var reconCount: Int { items.filter(\.isRecon).count }
     var isEmpty: Bool { items.isEmpty }
+
+    /// An empty plan the diner can act on, versus one that just says nothing.
+    var hasUnresolvedDishes: Bool { !deferToStaff.isEmpty }
 }
 
 struct PlannerObjective: Sendable {
@@ -43,21 +58,44 @@ struct RoundPlanner {
                      capacity: CapacityState,
                      exclusions: [String]) -> RoundPlan {
 
-        let allowed = candidates.filter {
-            ExclusionValidator.verdict(for: $0, exclusions: exclusions) == .safe
+        let partition = ExclusionValidator.partition(candidates, exclusions: exclusions)
+        let allowed = partition.safe
+        let deferToStaff = partition.unknown.map(\.name).sorted()
+
+        func empty() -> RoundPlan {
+            RoundPlan(items: [], rationale: objective.rationale,
+                      reconShare: objective.reconShare, posture: objective.posture,
+                      deferToStaff: deferToStaff, excludedCount: partition.excluded.count)
         }
-        guard !allowed.isEmpty else {
-            return RoundPlan(items: [], rationale: objective.rationale,
-                             reconShare: objective.reconShare, posture: objective.posture)
-        }
+
+        guard !allowed.isEmpty else { return empty() }
 
         let budget = min(capacity.remaining, CapacityEngine.platesToSatiety * 1.2)
-        guard budget > 0.2 else {
-            return RoundPlan(items: [], rationale: objective.rationale,
-                             reconShare: objective.reconShare, posture: objective.posture)
-        }
+        guard budget > 0.2 else { return empty() }
 
         let learnSet = Set(objective.learnAbout.map { $0.lowercased() })
+
+        // Reconnaissance is a property of the dish, not of its position in the list.
+        // A dish nobody has rated cannot be exploited — there is nothing to exploit —
+        // and a dish the agent asked to learn about is a taste by definition. Deciding
+        // it once, here, is what keeps the beam search costing the portion it will
+        // actually serve: the search used to price every candidate at `.normal` and the
+        // emitted plan then served 0.4× tastes, so a first round at a new venue spent
+        // 40% of the budget it had been allocated.
+        func isRecon(_ sighting: DishSighting) -> Bool {
+            if learnSet.contains(sighting.name.lowercased()) { return true }
+            return ValueEngine.posterior(dishName: sighting.name,
+                                         category: sighting.category,
+                                         events: events).sampleCount == 0
+        }
+
+        func portion(_ sighting: DishSighting) -> PortionBucket {
+            isRecon(sighting) ? .taste : .normal
+        }
+
+        func cost(_ sighting: DishSighting) -> Double {
+            ValueEngine.satietyCost(for: sighting, portion: portion(sighting))
+        }
 
         func score(_ sighting: DishSighting, alreadyChosen: [DishSighting]) -> Double {
             let posterior = ValueEngine.posterior(dishName: sighting.name,
@@ -100,10 +138,9 @@ struct RoundPlanner {
         for _ in 0..<maxItems {
             var expanded: [(path: [DishSighting], score: Double)] = []
             for path in beam {
-                let used = path.reduce(0.0) { $0 + ValueEngine.satietyCost(for: $1) }
+                let used = path.reduce(0.0) { $0 + cost($1) }
                 for candidate in allowed where !path.contains(where: { $0.name == candidate.name }) {
-                    let cost = ValueEngine.satietyCost(for: candidate)
-                    guard used + cost <= budget else { continue }
+                    guard used + cost(candidate) <= budget else { continue }
                     let next = path + [candidate]
                     let total = next.enumerated().reduce(0.0) { acc, pair in
                         acc + score(pair.element, alreadyChosen: Array(next.prefix(pair.offset)))
@@ -124,30 +161,23 @@ struct RoundPlanner {
             }
             return l < r
         }), !best.isEmpty else {
-            return RoundPlan(items: [], rationale: objective.rationale,
-                             reconShare: objective.reconShare, posture: objective.posture)
+            return empty()
         }
 
-        let reconTarget = Int((Double(best.count) * objective.reconShare.fraction).rounded())
-        let ordered = orderForSatiety(best)
-
-        let items = ordered.enumerated().map { index, sighting -> PlannedItem in
-            let posterior = ValueEngine.posterior(dishName: sighting.name,
-                                                  category: sighting.category,
-                                                  events: events)
-            let isRecon = index < reconTarget || posterior.sampleCount == 0
-            let portion: PortionBucket = isRecon ? .taste : .normal
-            return PlannedItem(dishName: sighting.name,
-                               category: sighting.category,
-                               portion: portion,
-                               isRecon: isRecon,
-                               satietyCost: portion.multiplier * sighting.category.satietyDensity)
+        let items = orderForSatiety(best).map { sighting -> PlannedItem in
+            PlannedItem(dishName: sighting.name,
+                        category: sighting.category,
+                        portion: portion(sighting),
+                        isRecon: isRecon(sighting),
+                        satietyCost: cost(sighting))
         }
 
         return RoundPlan(items: items,
                          rationale: objective.rationale,
                          reconShare: objective.reconShare,
-                         posture: objective.posture)
+                         posture: objective.posture,
+                         deferToStaff: deferToStaff,
+                         excludedCount: partition.excluded.count)
     }
 
     private static func orderForSatiety(_ sightings: [DishSighting]) -> [DishSighting] {

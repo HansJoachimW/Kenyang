@@ -78,6 +78,29 @@ final class KenyangStore {
         save()
     }
 
+    /// The diner asked staff and the answer was no. Recorded against the term, not as a
+    /// blanket "safe", so adding an exclusion later re-opens the question.
+    ///
+    /// This is the only path that resolves an `unknown` dish. The alternative — asking
+    /// the model whether *Nasi Goreng* contains peanuts — is the confident-and-wrong
+    /// failure the scope narrowing on 2026-09-04 exists to avoid, and it would be
+    /// wrong in the one direction that puts someone in hospital.
+    func clearExclusion(_ term: String, for sighting: DishSighting) {
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty, !sighting.clearedTerms.contains(trimmed) else { return }
+        sighting.clearedTerms.append(trimmed)
+        save()
+    }
+
+    /// The answer was yes. The term joins the ingredient list, which makes the dish
+    /// `excluded` for good.
+    func flagExclusion(_ term: String, for sighting: DishSighting) {
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty, !sighting.ingredients.contains(trimmed) else { return }
+        sighting.ingredients.append(trimmed)
+        save()
+    }
+
     func basisRecords() -> [BasisRecord] {
         let descriptor = FetchDescriptor<BasisRecord>(sortBy: [SortDescriptor(\.at, order: .reverse)])
         return (try? context.fetch(descriptor)) ?? []
@@ -204,6 +227,45 @@ final class KenyangStore {
         visit.outcome = .running
         save()
     }
+
+    /// The last Action Button press, held open for its reassign window.
+    ///
+    /// In memory, like `lastPlan`. If the process died between the two presses the
+    /// window is simply gone and the second press logs a new item rather than
+    /// correcting the first — which is the safe direction: a lost correction leaves an
+    /// honest log, a resurrected one would delete an event the diner never revisited.
+    struct PendingLog {
+        var event: TasteEvent
+        var itemIndex: Int
+        var at: Date
+    }
+
+    var pendingLog: PendingLog?
+
+    /// The next thing in the round the diner has not logged yet, in **plan order**.
+    /// Beam search already ranked the round, so plan order is the disambiguator — that
+    /// is what lets one press resolve without a picker, an unlock or a screen.
+    func nextUnloggedItem(in plan: RoundPlan, visit: Visit) -> (item: PlannedItem, index: Int)? {
+        let round = currentRound(in: visit)
+        let logged = Set(visit.tasteEvents
+            .filter { $0.roundIndex == round }
+            .map { $0.dishName.lowercased() })
+        for (index, item) in plan.items.enumerated() where !logged.contains(item.dishName.lowercased()) {
+            return (item, index)
+        }
+        return nil
+    }
+
+    func delete(_ event: TasteEvent) {
+        context.delete(event)
+        save()
+    }
+
+    /// Stop was tapped but no reason given yet. In memory, like `lastPlan`: it is a
+    /// state of the open snippet, not of the meal. `EndMealIntent` carries a required
+    /// `reason` because only a `fullness` ending measures capacity — so the snippet has
+    /// to ask before it can end anything, and this is the asking.
+    var stopRequested = false
 
     /// Rounds are not persisted, so the current one is the highest logged so far.
     /// An intent fired from Siri has no view model to ask.

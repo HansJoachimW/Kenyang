@@ -96,8 +96,13 @@ struct PlanRoundIntent: AppIntent {
                                minutesRemaining: visit.minutesRemaining,
                                exclusions: store.exclusions(),
                                basisRecords: store.basisRecords(),
-                               roundIndex: visit.tasteEvents.map(\.roundIndex).max() ?? 1,
-                               currentHypothesis: nil)
+                               roundIndex: store.currentRound(in: visit),
+                               currentHypothesis: nil,
+                               // Without these `checkCapacityModel` answers `insufficient`
+                               // every time it is asked from Siri, so the falsification
+                               // tool the whole capacity story rests on could never fire
+                               // on the one path that has no screen to fall back to.
+                               fullnessReadings: visit.fullnessReadings)
 
         switch await agent.run(input) {
         case .declined(let message):
@@ -244,8 +249,59 @@ struct EndMealIntent: AppIntent {
 
     @Dependency private var store: KenyangStore
 
+    init() {}
+
+    /// The snippet's reason buttons need to hand the intent a value. Without this the
+    /// only initialiser left `reason` unset, and a `Button(intent: EndMealIntent())`
+    /// inside a snippet has no way to ask for it — the tap failed instead of ending
+    /// the meal.
+    init(reason: MealEnding) {
+        self.reason = reason
+    }
+
     static var parameterSummary: some ParameterSummary {
         Summary("End the meal because \(\.$reason)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        store.stopRequested = false
+        guard let visit = store.activeVisit() else {
+            return .result(dialog: "No meal in progress.")
+        }
+        let eaten = visit.tasteEvents.count
+        store.endVisit(visit, outcome: .stopped, ending: reason)
+        RoundSnippetIntent.reload()
+        let tail = reason.measuresCapacity
+            ? "That gives me a real reading on your capacity."
+            : "I will treat that as at least this much, not a full measurement."
+        return .result(dialog: IntentDialog(stringLiteral: "Meal ended after \(eaten) item\(eaten == 1 ? "" : "s"). \(tail)"))
+    }
+}
+
+/// Asking staff happens at the table, standing up, phone in the other hand. Typing the
+/// answer into a list is the wrong shape for that moment — saying it is the right one.
+///
+/// The dish resolves against `MenuItemEntity`, so Siri asks *which dish* rather than
+/// guessing, which is the same closed-set rule that makes a mispronounced name safe.
+struct ConfirmIngredientIntent: AppIntent {
+    static var title: LocalizedStringResource = "Answer an ingredient question"
+    static var description = IntentDescription("Record what staff said about a dish you are avoiding something in.")
+    static var openAppWhenRun = false
+
+    @Parameter(title: "Dish")
+    var item: MenuItemEntity
+
+    @Parameter(title: "Ingredient")
+    var ingredient: String
+
+    @Parameter(title: "Does it contain it?")
+    var contains: Bool
+
+    @Dependency private var store: KenyangStore
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("\(\.$item) contains \(\.$ingredient): \(\.$contains)")
     }
 
     @MainActor
@@ -253,12 +309,32 @@ struct EndMealIntent: AppIntent {
         guard let visit = store.activeVisit() else {
             return .result(dialog: "No meal in progress.")
         }
-        let eaten = visit.tasteEvents.count
-        store.endVisit(visit, outcome: .stopped, ending: reason)
-        let tail = reason.measuresCapacity
-            ? "That gives me a real reading on your capacity."
-            : "I will treat that as at least this much, not a full measurement."
-        return .result(dialog: IntentDialog(stringLiteral: "Meal ended after \(eaten) item\(eaten == 1 ? "" : "s"). \(tail)"))
+        guard let sighting = visit.sightings.first(where: {
+            $0.name.caseInsensitiveCompare(item.name) == .orderedSame
+        }) else {
+            return .result(dialog: "\(item.name) is not on this menu.")
+        }
+
+        // The exclusion list is an input, never an inference: an answer about something
+        // the diner is not avoiding is recorded nowhere, because there is nothing it
+        // could change.
+        let known = store.exclusions()
+        let term = ingredient.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard known.contains(where: { $0 == term }) else {
+            return .result(dialog: "You are not avoiding \(ingredient), so that does not change anything.")
+        }
+
+        if contains {
+            store.flagExclusion(term, for: sighting)
+            return .result(dialog: "Noted — \(sighting.name) is out.")
+        }
+        store.clearExclusion(term, for: sighting)
+
+        let stillOpen = ExclusionValidator.unresolvedTerms(for: sighting, exclusions: known)
+        if stillOpen.isEmpty {
+            return .result(dialog: "\(sighting.name) is back in — I can plan it now.")
+        }
+        return .result(dialog: "Noted. Still need to know about \(stillOpen.joined(separator: " and ")).")
     }
 }
 
@@ -293,6 +369,13 @@ struct RoundSnippetIntent: SnippetIntent {
         guard visit.isActive else {
             return .result(view: MealOverSnippet(headline: "Meal ended",
                                                  detail: endingDetail(visit)))
+        }
+
+        // Stop is a two-step, in place. The reason is not a formality — only a
+        // `fullness` ending measures capacity — so the snippet asks for it rather than
+        // guessing, and asking is another rewrite of the same surface.
+        if store.stopRequested {
+            return .result(view: StopReasonSnippet())
         }
 
         switch visit.outcome {
@@ -332,6 +415,39 @@ struct AcceptRoundIntent: AppIntent {
         guard let visit = store.activeVisit() else { return .result() }
         store.acceptRound(visit)
         // Rewrites the snippet where it stands. No dismiss, no launch.
+        RoundSnippetIntent.reload()
+        return .result()
+    }
+}
+
+/// Step one of stopping: rewrite the snippet into the reason chooser. It writes nothing
+/// to the meal — a diner who taps Stop and changes their mind has changed nothing.
+struct RequestStopIntent: AppIntent {
+    static var title: LocalizedStringResource = "Stop the meal"
+    static var description = IntentDescription("Ask why the meal is ending, then end it.")
+    static var openAppWhenRun = false
+
+    @Dependency private var store: KenyangStore
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard store.activeVisit() != nil else { return .result() }
+        store.stopRequested = true
+        RoundSnippetIntent.reload()
+        return .result()
+    }
+}
+
+struct ResumeRoundIntent: AppIntent {
+    static var title: LocalizedStringResource = "Keep eating"
+    static var description = IntentDescription("Dismiss the stop prompt and carry on.")
+    static var openAppWhenRun = false
+
+    @Dependency private var store: KenyangStore
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        store.stopRequested = false
         RoundSnippetIntent.reload()
         return .result()
     }
@@ -379,16 +495,62 @@ struct PlanSnippet: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             }
+            DeferToStaffNote(plan: plan)
             Text("About \(String(format: "%.1f", capacity.plateEstimate)) plates left")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button(intent: AcceptRoundIntent()) { Text("Accept") }
                 Button(intent: AdjustRoundIntent()) { Text("Adjust") }
-                Button(intent: EndMealIntent()) { Text("Stop") }
+                Button(intent: RequestStopIntent()) { Text("Stop") }
             }
             .buttonStyle(.bordered)
         }
         .padding()
+    }
+}
+
+/// The third exclusion state, given a surface. A binary validator would have called
+/// these safe; this app refuses to plan them, and refusing silently is what made one
+/// dietary exclusion empty every plan with nothing on screen to explain it.
+struct DeferToStaffNote: View {
+    let plan: RoundPlan
+
+    var body: some View {
+        if plan.hasUnresolvedDishes {
+            Text("Ask staff about: \(plan.deferToStaff.joined(separator: ", "))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// What Stop turns the snippet into. Each button carries its reason, so the intent is
+/// never run with an unresolved parameter.
+struct StopReasonSnippet: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Why are you stopping?").font(.subheadline.weight(.medium))
+            Text("Only “I am full” measures your capacity. The rest tell me the meal ended before you did.")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(MealEnding.allCases, id: \.self) { ending in
+                Button(intent: EndMealIntent(reason: ending)) {
+                    Text(label(for: ending)).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            Button(intent: ResumeRoundIntent()) { Text("Keep eating") }
+        }
+        .buttonStyle(.bordered)
+        .padding()
+    }
+
+    private func label(for ending: MealEnding) -> String {
+        switch ending {
+        case .fullness: "I am full"
+        case .clock:    "Seating time ran out"
+        case .closing:  "The place is closing"
+        case .left:     "The group left"
+        case .unknown:  "Some other reason"
+        }
     }
 }
 
@@ -407,10 +569,11 @@ struct ReceiptSnippet: View {
                     Text(item.portion.rawValue).font(.caption2).foregroundStyle(.secondary)
                 }
             }
+            if let plan { DeferToStaffNote(plan: plan) }
             ProgressView(value: capacity.fractionRemaining)
             Text("About \(String(format: "%.1f", capacity.plateEstimate)) plates left")
                 .font(.caption).foregroundStyle(.secondary)
-            Button(intent: EndMealIntent()) { Text("Stop") }
+            Button(intent: RequestStopIntent()) { Text("Stop") }
                 .buttonStyle(.bordered)
         }
         .padding()
@@ -438,9 +601,13 @@ struct EmptyPlanSnippet: View {
 
 struct KenyangShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        // Phrases are a global namespace: "Log a dish in Kenyang" was registered here
+        // *and* on LogEatenIntent, and a duplicate phrase does not disambiguate — one
+        // of the two silently loses. Rating and logging are different intents, so they
+        // get different words.
         AppShortcut(intent: RateDishIntent(),
                     phrases: ["Rate a dish in \(.applicationName)",
-                              "Log a dish in \(.applicationName)"],
+                              "Rate what I ate in \(.applicationName)"],
                     shortTitle: "Rate a dish",
                     systemImageName: "star")
         AppShortcut(intent: PlanRoundIntent(),
@@ -469,6 +636,19 @@ struct KenyangShortcuts: AppShortcutsProvider {
                               "I am done in \(.applicationName)"],
                     shortTitle: "End the meal",
                     systemImageName: "flag.checkered")
+        // The Action Button target. There is no API to claim the button — the diner
+        // assigns it in Settings — so what the app owes is a zero-parameter intent that
+        // is worth assigning and findable in the picker.
+        AppShortcut(intent: LogNextItemIntent(),
+                    phrases: ["Log the next item in \(.applicationName)",
+                              "Next plate in \(.applicationName)"],
+                    shortTitle: "Log next item",
+                    systemImageName: "circle.badge.checkmark")
+        AppShortcut(intent: ConfirmIngredientIntent(),
+                    phrases: ["Answer an ingredient question in \(.applicationName)",
+                              "Staff checked an ingredient in \(.applicationName)"],
+                    shortTitle: "Ingredient answer",
+                    systemImageName: "checkmark.shield")
         AppShortcut(intent: StartSessionIntent(),
                     phrases: ["Start a buffet in \(.applicationName)",
                               "Start a session in \(.applicationName)"],

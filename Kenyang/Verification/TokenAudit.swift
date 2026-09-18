@@ -368,14 +368,18 @@ enum TokenAudit {
                + Double(d.components.attoseconds) / 1e18)
     }
 
+    /// `.reasoning` arrived with the iOS 26.5 SDK's successor and is only present at
+    /// runtime on the newer OS. The audit counts transcript entries, so an unlabelled
+    /// one would have been filed as "unknown" and quietly mis-attributed.
     private static func label(for entry: Transcript.Entry) -> String {
+        if #available(iOS 27.0, *), case .reasoning = entry { return "reasoning" }
         switch entry {
-        case .instructions:   "instructions"
-        case .prompt:         "prompt"
-        case .toolCalls:      "tool calls"
-        case .toolOutput:     "TOOL RESULT"
-        case .response:       "response"
-        @unknown default:     "unknown"
+        case .instructions:   return "instructions"
+        case .prompt:         return "prompt"
+        case .toolCalls:      return "tool calls"
+        case .toolOutput:     return "TOOL RESULT"
+        case .response:       return "response"
+        default:              return "unknown"
         }
     }
 

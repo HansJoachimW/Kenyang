@@ -38,6 +38,11 @@ final class VerificationRunner {
         await snippetUpdatesInPlace()
         await entitiesResolve()
         excludedNeverPlanned()
+        ingredientQuestionsResolve()
+        actionButtonLogsInPlanOrder()
+        planSpendsWhatItBudgets()
+        await budgetExhaustionIsVisible()
+        await modelTierIsDeclared()
         refusesOneSample()
         objectiveDrivesPlan()
         await toolsAndRefusals()
@@ -500,7 +505,290 @@ final class VerificationRunner {
         emit("planned: \(planned.sorted().joined(separator: ", "))")
         emit("\(excludedLeaked ? "❌" : "✅") EXCLUDED dish absent from plan")
         emit("\(unknownLeaked ? "❌" : "✅") UNKNOWN dish never planned silently")
-        emit("excluded dishes are never planned: \(passed == 3 && !excludedLeaked && !unknownLeaked ? "PASS" : "FAIL")")
+
+        // The name is determinable on its own. Checking `ingredientsKnown` first meant
+        // "Prawn Tempura" against an exclusion of *prawn* came back `unknown` — the one
+        // dish the app could rule out with no extra data.
+        let byName = DishSighting(name: "Prawn Tempura", category: .fried)
+        let nameVerdict = ExclusionValidator.verdict(for: byName, exclusions: exclusions)
+        let nameOK = nameVerdict == .excluded
+        emit("\(nameOK ? "✅" : "❌") name alone excludes \(byName.name) → \(nameVerdict.rawValue)")
+
+        // The defect this check missed for a fortnight. Its own fixtures set
+        // `ingredientsKnown` by hand; nothing in the shipping app ever does, so one
+        // exclusion resolved every real dish to `unknown`, the planner filtered to
+        // `safe`, and the agent returned an empty plan with nothing said about it.
+        let realPath = DemoSpread.standard.map {
+            DishSighting(name: $0.name, category: $0.category,
+                         printedCategory: $0.printed, tierRank: $0.tier)
+        }
+        let realPlan = RoundPlanner.plan(objective: .balanced,
+                                         candidates: realPath,
+                                         events: [],
+                                         capacity: CapacityState(maxSatiety: 9, spent: 0),
+                                         exclusions: ["peanut"])
+        let surfaced = realPlan.hasUnresolvedDishes
+        emit("real path — \(realPath.count) dishes, no ingredient lists, exclusion [peanut]")
+        emit("  planned: \(realPlan.items.count) · deferToStaff: \(realPlan.deferToStaff.count) · excluded: \(realPlan.excludedCount)")
+        emit("\(surfaced ? "✅" : "❌") undeterminable dishes leave the planner BY NAME, not silently")
+
+        let pass = passed == 3 && !excludedLeaked && !unknownLeaked && nameOK && surfaced
+        emit("excluded dishes are never planned: \(pass ? "PASS" : "FAIL")")
+        emit("")
+    }
+
+    private func planSpendsWhatItBudgets() {
+        emit("──── the plan serves the portion it budgeted ⭐ ────")
+        emit("The beam search priced every candidate at .normal and the emitted plan")
+        emit("then served 0.4× tastes. At n=0 every item is recon, so a first round at")
+        emit("a new venue spent 40% of the budget it had been allocated.")
+
+        let spread = DemoSpread.standard.map {
+            DishSighting(name: $0.name, category: $0.category,
+                         printedCategory: $0.printed, tierRank: $0.tier)
+        }
+
+        // Every item unrated → every item a taste. Priced at .normal the search would
+        // admit one or two; priced at what it serves it packs the round.
+        let coldStart = RoundPlanner.plan(objective: .balanced, candidates: spread,
+                                          events: [], capacity: CapacityState(maxSatiety: 9, spent: 0),
+                                          exclusions: [])
+        let allTastes = coldStart.items.allSatisfy { $0.portion == .taste }
+        let served = coldStart.items.reduce(0.0) {
+            $0 + ValueEngine.satietyCost(for: DishSighting(name: $1.dishName, category: $1.category),
+                                         portion: $1.portion)
+        }
+        let agrees = abs(served - coldStart.totalSatietyCost) < 0.001
+        emit("cold start n=0: \(coldStart.items.count) items, \(String(format: "%.2f", coldStart.totalSatietyCost)) satiety")
+        emit("\(allTastes ? "✅" : "❌") every unrated item served as a taste")
+        emit("\(agrees ? "✅" : "❌") budgeted cost == served cost (\(String(format: "%.2f", served)))")
+
+        // A budget only one normal portion wide. Under the old accounting the search
+        // charged 0.9 per meat and stopped at one item; it serves 0.36.
+        let tight = RoundPlanner.plan(objective: .balanced, candidates: spread,
+                                      events: [], capacity: CapacityState(maxSatiety: 1.5, spent: 0),
+                                      exclusions: [])
+        let fits = tight.totalSatietyCost <= 1.5 + 0.001
+        let packs = tight.items.count > 1
+        emit("tight budget 1.5: \(tight.items.count) items, \(String(format: "%.2f", tight.totalSatietyCost)) satiety")
+        emit("\(fits ? "✅" : "❌") stays inside the budget")
+        emit("\(packs ? "✅" : "❌") packs more than one taste into a normal-portion budget")
+
+        emit("the plan serves the portion it budgeted: \(allTastes && agrees && fits && packs ? "PASS" : "FAIL")")
+        emit("")
+    }
+
+    private func budgetExhaustionIsVisible() async {
+        emit("──── a spent loop budget says so ⭐ ────")
+        emit("Past round 6 every model call is refused: the hypothesis falls back, the")
+        emit("objective drops to balanced, the decision returns unchanged. None of it")
+        emit("was recorded — in the panel four criteria rest on.")
+
+        let trace = TraceLog()
+        // maxRounds 0 exhausts on the first beginRound(), so this costs no model calls
+        // and reproduces round 7 exactly.
+        let agent = RoundAgent(trace: trace, budget: LoopBudget(maxRounds: 0))
+        let spread = DemoSpread.standard.map {
+            DishSighting(name: $0.name, category: $0.category,
+                         printedCategory: $0.printed, tierRank: $0.tier)
+        }
+        let outcome = await agent.run(AgentInput(sightings: spread,
+                                                 events: [],
+                                                 capacity: CapacityState(maxSatiety: 9, spent: 0),
+                                                 minutesRemaining: 55,
+                                                 exclusions: [],
+                                                 basisRecords: [],
+                                                 roundIndex: 7,
+                                                 currentHypothesis: nil))
+
+        let refusals = trace.entries.filter { $0.title == "loop budget" }
+        for entry in refusals { emit("  · \(entry.detail)") }
+
+        let recorded = !refusals.isEmpty
+        let stillPlans: Bool
+        switch outcome {
+        case .planned(let plan, _, _), .degraded(let plan, _): stillPlans = !plan.isEmpty
+        default: stillPlans = false
+        }
+        emit("\(recorded ? "✅" : "❌") the refusal is in the trace, attributed as deterministic")
+        emit("\(stillPlans ? "✅" : "❌") the round still produces a plan from the deterministic path")
+
+        // The third reason, which was declared and never read at all.
+        var clock = LoopBudget(wallClockLimit: 1)
+        clock.beginRound()
+        let expired = clock.consumeCall(now: .now.addingTimeInterval(5))
+        let clockOK = expired == .wallClockExpired
+        emit("\(clockOK ? "✅" : "❌") wallClockLimit is enforced → \(expired?.rawValue ?? "allowed")")
+
+        emit("a spent loop budget says so: \(recorded && stillPlans && clockOK ? "PASS" : "FAIL")")
+        emit("")
+    }
+
+    private func actionButtonLogsInPlanOrder() {
+        emit("──── the Action Button logs, and never rates ⭐ ────")
+        emit("One press, phone face-down, no screen. Plan order is the disambiguator —")
+        emit("beam search already ranked the round, so there is nothing to pick from.")
+
+        let scratch = KenyangStore(container: KenyangStore.makeContainer(inMemory: true))
+        let visit = scratch.startVisit(restaurantName: "Battery", pricePerHead: 250_000,
+                                       seatingLimitMinutes: 90, maxSatiety: 9)
+        scratch.addSightings([
+            (name: "Karubi", category: .meat, printed: "MEAT", tier: 0),
+            (name: "Harami", category: .meat, printed: "MEAT", tier: 0),
+            (name: "Salmon Sashimi", category: .raw, printed: "SUSHI", tier: 0)
+        ], to: visit)
+        scratch.lastPlan = RoundPlanner.plan(objective: .balanced,
+                                             candidates: visit.sightings,
+                                             events: [],
+                                             capacity: CapacityEngine.state(for: visit),
+                                             exclusions: [])
+        guard let plan = scratch.lastPlan, plan.items.count >= 2 else {
+            emit("❌ could not build a plan with two items — inconclusive"); emit(""); return
+        }
+        let first = plan.items[0].dishName
+        let second = plan.items[1].dishName
+        emit("plan order: \(plan.items.map(\.dishName).joined(separator: " → "))")
+
+        // ① first press takes the head of the plan
+        _ = LogNextItemIntent.press(on: scratch)
+        let afterOne = visit.tasteEvents.map(\.dishName)
+        let tookFirst = afterOne == [first]
+        emit("\(tookFirst ? "✅" : "❌") press 1 → \(afterOne) (expected [\(first)])")
+
+        // ② it logged without rating — the capacity loop only
+        let unrated = visit.tasteEvents.allSatisfy { !$0.isRated }
+        emit("\(unrated ? "✅" : "❌") logged WITHOUT a rating — no fabricated value observation")
+
+        // ③ a second press inside the window corrects rather than adds
+        _ = LogNextItemIntent.press(on: scratch)
+        let afterTwo = visit.tasteEvents.map(\.dishName)
+        let reassigned = afterTwo == [second]
+        emit("\(reassigned ? "✅" : "❌") press 2 within 8 s → \(afterTwo) (expected [\(second)], NOT two events)")
+
+        // ④ outside the window the same press means "and another"
+        scratch.pendingLog?.at = .now.addingTimeInterval(-LogNextItemIntent.reassignWindow - 1)
+        _ = LogNextItemIntent.press(on: scratch)
+        let afterThree = visit.tasteEvents.count
+        let appended = afterThree == 2
+        emit("\(appended ? "✅" : "❌") press 3 after the window → \(afterThree) events (expected 2)")
+
+        // ⑤ the stop check runs on every press
+        let exhausted = CapacityState(maxSatiety: 9, spent: 8.5)
+        let fires = StopGuard.shouldStop(capacity: exhausted, minutesRemaining: 40)
+        emit("\(fires ? "✅" : "❌") StopGuard still fires on an exhausted budget")
+
+        let pass = tookFirst && unrated && reassigned && appended && fires
+        emit("the Action Button logs, and never rates: \(pass ? "PASS" : "FAIL")")
+        emit("⚠️ the HAPTIC is unverified — UIFeedbackGenerator needs a foreground scene,")
+        emit("   and the Action Button runs this in the background. Dialog is the")
+        emit("   guaranteed channel; the taps have never been felt on a device.")
+        emit("")
+    }
+
+    private func ingredientQuestionsResolve() {
+        emit("──── an undeterminable dish can be resolved ⭐ ────")
+        emit("The exclusion list is an input, never an inference. Asking the model")
+        emit("whether Nasi Goreng contains peanuts is the confident-and-wrong failure")
+        emit("this project narrowed scope to avoid — so the diner answers, not the model.")
+
+        let exclusions = ["peanut", "shellfish"]
+        let dish = DishSighting(name: "Nasi Goreng", category: .starch)
+
+        let before = ExclusionValidator.verdict(for: dish, exclusions: exclusions)
+        let openBefore = ExclusionValidator.unresolvedTerms(for: dish, exclusions: exclusions)
+        emit("start: \(before.rawValue), open questions \(openBefore)")
+
+        dish.clearedTerms = ["peanut"]
+        let half = ExclusionValidator.verdict(for: dish, exclusions: exclusions)
+        let openHalf = ExclusionValidator.unresolvedTerms(for: dish, exclusions: exclusions)
+        emit("after clearing peanut: \(half.rawValue), open questions \(openHalf)")
+
+        dish.clearedTerms = ["peanut", "shellfish"]
+        let resolved = ExclusionValidator.verdict(for: dish, exclusions: exclusions)
+        emit("after clearing both: \(resolved.rawValue)")
+
+        // The direction that matters. A single `isSafe` flag would leave this dish safe
+        // against a term nobody ever asked about.
+        let widened = ExclusionValidator.verdict(for: dish, exclusions: exclusions + ["sesame"])
+        emit("after ADDING sesame to the list: \(widened.rawValue)")
+
+        let partial = half == .unknown && openHalf == ["shellfish"]
+        let clears  = resolved == .safe
+        let reopens = widened == .unknown
+        emit("\(before == .unknown ? "✅" : "❌") starts undeterminable")
+        emit("\(partial ? "✅" : "❌") one answer does not settle the other term")
+        emit("\(clears ? "✅" : "❌") answering every term makes it plannable")
+        emit("\(reopens ? "✅" : "❌") a NEW exclusion re-opens a dish already cleared")
+
+        // And it must actually reach a plan, which is the half that was missing.
+        let spread = DemoSpread.standard.map {
+            DishSighting(name: $0.name, category: $0.category,
+                         printedCategory: $0.printed, tierRank: $0.tier)
+        }
+        for s in spread { s.clearedTerms = ["peanut"] }
+        let plan = RoundPlanner.plan(objective: .balanced, candidates: spread, events: [],
+                                     capacity: CapacityState(maxSatiety: 9, spent: 0),
+                                     exclusions: ["peanut"])
+        let plans = !plan.isEmpty
+        emit("\(plans ? "✅" : "❌") a fully answered menu plans again (\(plan.items.count) items)")
+
+        emit("an undeterminable dish can be resolved: \(before == .unknown && partial && clears && reopens && plans ? "PASS" : "FAIL")")
+        emit("")
+    }
+
+    private func modelTierIsDeclared() async {
+        emit("──── the framework tier is declared ⭐ ────")
+        emit("Built against the iOS 26 baseline. iOS 27 turns two written promises into")
+        emit("framework behaviour; both paths ship and the trace says which one ran.")
+
+        emit("tier: \(AgentCapabilities.summary)")
+        emit("  tool calling enforced by the framework: \(AgentCapabilities.enforcesToolCalling)")
+        emit("  failed turns reverted from the transcript: \(AgentCapabilities.revertsFailedTurns)")
+
+        guard case .available = SystemLanguageModel.default.availability else {
+            emit("⚠️ model unavailable — the tier is declared but unexercised"); emit(""); return
+        }
+
+        // On 27 `.required` means the framework will not answer without consulting a
+        // tool. On 26.5 the same call is only ever asked to. Either way the assertion
+        // is the same one, and only one of them is a guarantee.
+        let spread = DemoSpread.standard.map {
+            DishSighting(name: $0.name, category: $0.category,
+                         printedCategory: $0.printed, tierRank: $0.tier)
+        }
+        await ToolContext.shared.resetInvocations()
+        await ToolContext.shared.load(sightings: spread, events: [],
+                                      capacity: CapacityState(maxSatiety: 9, spent: 0),
+                                      minutesRemaining: 55, exclusions: [],
+                                      basisRecords: [], fullnessReadings: [], hypothesisCategory: .raw)
+
+        let session = AgentCapabilities.session(tools: AgentToolbox.readTools,
+                                                instructions: RoundAgent.instructions)
+        var failure: String?
+        do {
+            _ = try await session.respond(to: "Where is the value concentrated here?",
+                                          generating: ValueHypothesis.self,
+                                          options: AgentCapabilities.toolBound(300)).content
+        } catch {
+            failure = "\(error)"
+        }
+
+        let invoked = await ToolContext.shared.invocationList
+        emit("tools invoked under the active tier: \(invoked.isEmpty ? "none" : invoked.joined(separator: ", "))")
+
+        // `availability == .available` and *the call actually works* are different
+        // claims, and a `try?` here conflated them: a runtime whose assets have not
+        // downloaded reports available, fails every call, and would have been recorded
+        // as this app failing to call its tools.
+        if let failure {
+            emit("⚠️ the call itself failed — \(String(failure.prefix(160)))")
+            emit("⚠️ tier UNEXERCISED on this runtime. This is not a result about the app.")
+            emit("the framework tier is declared: SKIPPED — declared, not exercised")
+            emit("")
+            return
+        }
+        emit("\(invoked.isEmpty ? "❌" : "✅") the tool-bound call consulted the tools")
+        emit("the framework tier is declared: \(invoked.isEmpty ? "FAIL" : "PASS")")
         emit("")
     }
 

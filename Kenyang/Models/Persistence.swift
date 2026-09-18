@@ -90,6 +90,14 @@ final class DishSighting {
     var queueMinutes: Int = 0
     var ingredientsKnown: Bool = false
     var ingredients: [String] = []
+    /// Exclusion terms the diner has confirmed, for this dish, after asking staff.
+    /// Held per-term rather than as one `isSafe` flag on purpose: clearing *peanut*
+    /// says nothing about *shellfish*, and a dish cleared against today's list must go
+    /// back to `unknown` the moment a new term is added. A single boolean would fail
+    /// open in exactly that case, which is the one direction that is unrecoverable.
+    ///
+    /// Added with a default, never renamed — see the vocabulary-migration test.
+    var clearedTerms: [String] = []
     var visit: Visit?
 
     init(name: String,
@@ -99,7 +107,8 @@ final class DishSighting {
          isTerminal: Bool? = nil,
          queueMinutes: Int = 0,
          ingredientsKnown: Bool = false,
-         ingredients: [String] = []) {
+         ingredients: [String] = [],
+         clearedTerms: [String] = []) {
         self.name = name
         self.categoryRaw = category.rawValue
         self.printedCategory = printedCategory
@@ -108,6 +117,7 @@ final class DishSighting {
         self.queueMinutes = queueMinutes
         self.ingredientsKnown = ingredientsKnown
         self.ingredients = ingredients
+        self.clearedTerms = clearedTerms
     }
 
     var category: MenuCategory {

@@ -61,6 +61,11 @@ struct KenyangApp: App {
                         await SchemaProbe.retryProbe()
                         if !all { exit(0) }
                     }
+                    if all || args.contains("--branch-battery") {
+                        BranchBattery.stopIsDeterministic()
+                        await BranchBattery.run()
+                        if !all { exit(0) }
+                    }
                     if all {
                         print("[RUN-ALL] every harness complete")
                         fflush(stdout)
