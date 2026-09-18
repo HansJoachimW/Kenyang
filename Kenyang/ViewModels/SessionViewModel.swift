@@ -352,15 +352,18 @@ final class SessionViewModel {
     func endMeal(reason: MealEnding) {
         guard let visit else { return }
         let capacity = CapacityEngine.state(for: visit)
-        LiveActivityController.shared.end(
-            LiveActivityController.state(phase: .stopGuard,
-                                         capacity: capacity,
-                                         minutesRemaining: visit.minutesRemaining,
-                                         roundIndex: roundIndex,
-                                         nextTarget: nil,
-                                         message: "Meal ended.")
-        )
+        let ended = LiveActivityController.state(phase: .stopGuard,
+                                                 capacity: capacity,
+                                                 minutesRemaining: visit.minutesRemaining,
+                                                 roundIndex: roundIndex,
+                                                 nextTarget: nil,
+                                                 message: "Meal ended.")
+        LiveActivityController.shared.end(ended)
         store.endVisit(visit, outcome: .stopped, ending: reason)
+        // After `endVisit`, so the snapshot records `isActive: false`. The Live Activity
+        // dismisses itself and the widget does not — it would otherwise show the ended
+        // meal's remaining capacity until the next meal started.
+        LiveActivityController.shared.publishSnapshot(visit: visit, state: ended)
         pathSignatures.append(trace.pathSignature)
         self.visit = nil
         self.plan = nil

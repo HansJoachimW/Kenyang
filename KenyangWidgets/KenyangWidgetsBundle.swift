@@ -6,5 +6,6 @@ struct KenyangWidgetsBundle: WidgetBundle {
     var body: some Widget {
         RoundLiveActivity()
         CapacityWidget()
+        StartSessionControl()
     }
 }

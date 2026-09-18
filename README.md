@@ -349,7 +349,7 @@ Island presentations.
 ### Built but never exercised on device
 
 This is the distinction that matters, and it is the one an examiner probes. Everything
-above is measured **in the app battery**, 20 checks, and **every screenshot in this
+above is measured **in the app battery**, 22 checks, and **every screenshot in this
 repository is from the Simulator.** None of the following has been run by voice, by
 search, or with the app closed:
 
@@ -363,9 +363,14 @@ search, or with the app closed:
   dialog is the channel that works; the taps have never been felt
 * **The Live Activity and the Island rendering.** The state machine behind them passes
   9/9 checks; the drawing has never been seen on hardware
-* **The home-screen widget with real data.** It needs the App Group capability on both
-  targets, which is a signing capability — until it is added the widget shows its
-  placeholder and `MealSnapshotStore.isConfigured` reports why
+* **The home-screen widget with real data.** The App Group is wired on both targets now
+  and `MealSnapshotStore.isConfigured` reports `resolved` in the battery — so the widget
+  has real numbers to read. Nobody has put it on a home screen and looked
+* **The Control Center control.** `StartSessionControlIntent` is a `LiveActivityIntent`,
+  so it starts the meal in the app's process with the app closed — asserted in the
+  battery, but the tile has never been added to Control Center or a Lock Screen
+* **The Dining focus filter.** The venue it pins is read by every session started from a
+  system surface; the Focus row in Settings has never been opened
 
 ### The Simulator is faster than the design assumed, and that matters
 
@@ -395,11 +400,12 @@ typical case.
    fixed, four tastes come to ~1.1 of a ~3.6 satiety budget. The accounting is now
    honest; whether a round should serve more than four dishes is an open product
    question, not a bug.
-6. **The Live Activity, the Island and the widget are built and unseen.** The
-   `KenyangWidgets` target exists and the state derivation passes 9/9 checks; nothing has
-   been rendered on hardware. The widget also needs the App Group capability, which is a
-   signing capability and cannot be added from code.
-7. No Control Center control, Focus filter or background task.
+6. **The Live Activity, the Island, the widget, the control and the Focus row are built
+   and unseen.** The `KenyangWidgets` target exists, the state derivation passes 9/9
+   checks and the App Group now resolves; **none of the six surfaces has been rendered on
+   hardware.** Building B9 made this list longer, not shorter.
+7. ~~No Control Center control, Focus filter or background task.~~ → the first two landed
+   with B9 on 2026-09-19. **No background task** — that is B8, still unbuilt.
 8. Grill constraints — slots, cook time, plain-before-marinated — are designed, not
    implemented in `RoundPlanner`.
 9. **`KenyangStore` is not `@Observable`.** Screens that read it directly — the tier
@@ -459,6 +465,27 @@ test.** The battery was green through every one of them.
   below: the fit then averages lower bounds as though they were observations. Neither
   path ends a visit now until the diner has answered.
 
+**Closed 2026-09-19 — a falsification instrument that could not falsify.**
+
+* **A `skip` hypothesis could never be contradicted.** The verdict tested every
+  expectation as `observed >= expected − 0.25`. `Rating.skip` scores `0.0`, so the
+  threshold sat at **−0.25 — below a 0…1 scale**, and every rating beat it. Expecting
+  `skip` is the claim *"this category is not worth the capacity"*: the one hypothesis
+  shape that is pure falsification, and it came back `supported` whatever the diner
+  rated. The comparison had been **copied into four files**, each commented *"the same
+  computation as…"*, so `evaluateHypothesis` — the tool whose own description calls it
+  *the only authority on whether the hypothesis holds* — carried it too. It is now one
+  `ValueEngine.verdict(_:expecting:)`, one-sided **in the direction the claim points**:
+  *expect good here* is falsified by worse ratings, *expect skip here* by better ones.
+  The `.good` and `.fine` verdicts are asserted unchanged, because TB's ground truth is
+  built from this same rule — and all 20 of its scenarios expect `.good` or `.fine`, so
+  **the −5% discrimination figure below is not confounded by this.**
+* **`budget` meant two different things.** Model calls in code, stomach capacity in the
+  prompts and tool descriptions — and the model, having no definition for it, echoed it
+  back as filler. Everything the model reads now says **capacity**; `LoopBudget` keeps
+  the word in code, where it only ever meant one thing. ⚠️ Whether this moves the decode
+  rate is **unmeasured** and needs a device run.
+
 ### The capacity model has a defect that would not announce itself
 
 `CapacityEngine.fittedMax(from:)` averages the cumulative satiety of completed visits. **Those totals are lower bounds, not observations** — a meal that ended because the seating expired says only `S_max ≥ that total`. Averaging censored with uncensored data biases `S_max` **downward, and worse the more the app is used**, while every screen keeps looking correct.
@@ -512,6 +539,10 @@ estimate"* in all twenty scenarios. The model folded that constant into its move
 One input varied and a second sat pinned at a value that argues for changing course. Runs
 2 and 3 hold it at `consistent`. **A second tool returning a constant is not neutral —
 the model will reason from it.**
+
+*(Both strings are quoted as they read in September. The tool now says "the capacity
+estimate is unverified" — `budget` was the word that meant model calls in code and
+stomach capacity in the prompts, and the model had no definition for either.)*
 
 **Decode failure clusters on the branch that was already losing.** Across the two clean
 runs, `contradicted` scenarios failed to decode **5/14** against **2/14** for `supported`,

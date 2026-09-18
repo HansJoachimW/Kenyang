@@ -24,21 +24,46 @@ struct KenyangApp: App {
 
     @MainActor
     private static func handle(_ command: ActivityCommand, store: KenyangStore) {
+        // The only command that is legitimate with no meal running, so it is answered
+        // before the guard rather than inside it.
+        if command == .startSession {
+            guard store.activeVisit() == nil else { return }
+            let visit = store.startVisit(restaurantName: DiningFocus.venueForNewSession(),
+                                         pricePerHead: SessionDefaults.pricePerHead,
+                                         seatingLimitMinutes: SessionDefaults.seatingMinutes,
+                                         maxSatiety: SessionDefaults.maxSatiety)
+            store.addSightings(DemoSpread.standard, to: visit)
+            let state = LiveActivityController.state(
+                phase: .planning,
+                capacity: CapacityEngine.state(for: visit),
+                minutesRemaining: visit.minutesRemaining,
+                roundIndex: 1,
+                nextTarget: nil,
+                message: nil)
+            LiveActivityController.shared.start(venue: visit.restaurant?.name ?? "Buffet", state: state)
+            LiveActivityController.shared.publishSnapshot(visit: visit, state: state)
+            return
+        }
+
         guard let visit = store.activeVisit() else { return }
         switch command {
+        case .startSession:
+            return // handled above
         case .stop:
             // A one-tap Stop cannot know WHY the meal ended, and only a `fullness`
             // ending measures capacity. Recording `.unknown` keeps it an honest lower
             // bound instead of feeding the fit an observation nobody made.
             store.endVisit(visit, outcome: .stopped, ending: .unknown)
-            LiveActivityController.shared.end(
-                LiveActivityController.state(phase: .stopGuard,
-                                             capacity: CapacityEngine.state(for: visit),
-                                             minutesRemaining: visit.minutesRemaining,
-                                             roundIndex: store.currentRound(in: visit),
-                                             nextTarget: nil,
-                                             message: "Meal ended.")
-            )
+            let ended = LiveActivityController.state(phase: .stopGuard,
+                                                     capacity: CapacityEngine.state(for: visit),
+                                                     minutesRemaining: visit.minutesRemaining,
+                                                     roundIndex: store.currentRound(in: visit),
+                                                     nextTarget: nil,
+                                                     message: "Meal ended.")
+            LiveActivityController.shared.end(ended)
+            // The Live Activity goes away by itself; the widget does not. Without this
+            // it keeps showing the ended meal's capacity as though it were live.
+            LiveActivityController.shared.publishSnapshot(visit: visit, state: ended)
         case .rateGood, .rateSkip:
             // Unlike the Action Button this rates, because the Island names the dish
             // directly above the buttons — the diner can see what they are answering.

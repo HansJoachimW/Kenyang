@@ -1,9 +1,9 @@
 import AppIntents
 import Foundation
 
-/// The commands a Live Activity button can send.
+/// The commands a Live Activity button or a Control Center control can send.
 enum ActivityCommand: String, Sendable {
-    case rateGood, rateSkip, stop
+    case rateGood, rateSkip, stop, startSession
 }
 
 /// How a button in the widget extension reaches the app's store.
@@ -64,6 +64,29 @@ struct StopFromActivityIntent: LiveActivityIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         ActivityBridge.shared.send(.stop)
+        return .result()
+    }
+}
+
+/// What the Control Center control runs. **Not** `StartSessionIntent`, which opens the
+/// app — *"an intent that only opens the app is a launcher"*, and a control that launches
+/// an app is a shortcut with extra steps.
+///
+/// It is a `LiveActivityIntent` for the same reason the three above are: `perform()` has
+/// to reach `KenyangStore`, which lives in the app's process and not the extension's.
+/// That conformance is also literally true here — starting a session is what starts the
+/// Live Activity, which is the whole point of the control (`BUFFET.md` §10: *Control
+/// Center: start session → Live Activity begins*).
+///
+/// Discoverable, unlike the three above, because *"start a meal"* is a complete
+/// instruction on its own and belongs in Shortcuts.
+struct StartSessionControlIntent: LiveActivityIntent {
+    static var title: LocalizedStringResource = "Start a meal"
+    static var description = IntentDescription("Begin a meal and start the Live Activity, without opening the app.")
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        ActivityBridge.shared.send(.startSession)
         return .result()
     }
 }

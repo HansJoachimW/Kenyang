@@ -42,6 +42,7 @@ final class VerificationRunner {
         degenerateClaimsAreCaught()
         actionButtonLogsInPlanOrder()
         activityStateTracksTheMeal()
+        minorSurfacesAreWired()
         planSpendsWhatItBudgets()
         await budgetExhaustionIsVisible()
         await modelTierIsDeclared()
@@ -922,6 +923,74 @@ final class VerificationRunner {
         emit("\(StatisticalGuard.canClaim(p1) ? "❌" : "✅") n=1 → claim refused")
         emit("\(StatisticalGuard.canClaim(p2) ? "✅" : "❌") n=2 → claim allowed")
         emit("no claim from one rating: \(!StatisticalGuard.canClaim(p1) && StatisticalGuard.canClaim(p2) ? "PASS" : "FAIL")")
+        emit("")
+    }
+
+    private func minorSurfacesAreWired() {
+        emit("──── the minor surfaces are wired  ·  TESTS.md T15 · T16 · T17 ────")
+        emit("Control Center, the Focus filter and the widget all reach the app through")
+        emit("the App Group. Rendering is a device check; what is checkable here is that")
+        emit("each one has something real on the other end of it.")
+
+        var checks: [(String, Bool)] = []
+
+        // T15/T17 both fail silently without this: `UserDefaults(suiteName:)` returns nil
+        // and every read falls back to a placeholder that looks plausible.
+        let grouped = MealSnapshotStore.isConfigured
+        checks.append(("the App Group resolves", grouped))
+        emit("\(grouped ? "✅" : "❌") App Group \(MealSnapshotStore.appGroup) → \(grouped ? "resolved" : "NOT CONFIGURED — tick App Groups on both targets")")
+
+        // T16 — the focus filter's only observable consequence.
+        let previous = DiningFocus.venueName
+        DiningFocus.venueName = "Gyu-Kaku"
+        let pinned = DiningFocus.venueForNewSession() == "Gyu-Kaku"
+        DiningFocus.venueName = nil
+        let unpinned = DiningFocus.venueForNewSession() == "Demo Buffet"
+        DiningFocus.venueName = previous
+        checks.append(("a pinned venue is used", pinned))
+        checks.append(("no focus falls back", unpinned))
+        emit("\(pinned ? "✅" : "❌") focus pins Gyu-Kaku → a new session starts there")
+        emit("\(unpinned ? "✅" : "❌") focus off → falls back, the filter is not load-bearing")
+
+        // T15 — a control that opens the app is a shortcut with extra steps.
+        let controlStaysOut = !StartSessionControlIntent.openAppWhenRun
+        checks.append(("the control does not open the app", controlStaysOut))
+        emit("\(controlStaysOut ? "✅" : "❌") StartSessionControlIntent.openAppWhenRun = \(StartSessionControlIntent.openAppWhenRun)")
+
+        // T17 — the defect this check exists for. The Live Activity dismisses itself when
+        // a meal ends; the widget does not, so an ended meal kept rendering its remaining
+        // capacity as though the diner were still at the table.
+        let scratch = KenyangStore(container: KenyangStore.makeContainer(inMemory: true))
+        let visit = scratch.startVisit(restaurantName: "Gyu-Kaku",
+                                       pricePerHead: SessionDefaults.pricePerHead,
+                                       seatingLimitMinutes: SessionDefaults.seatingMinutes,
+                                       maxSatiety: SessionDefaults.maxSatiety)
+        let live = LiveActivityController.state(phase: .active,
+                                                capacity: CapacityEngine.state(for: visit),
+                                                minutesRemaining: 40, roundIndex: 2,
+                                                nextTarget: "Karubi", message: nil)
+        LiveActivityController.shared.publishSnapshot(visit: visit, state: live)
+        let during = MealSnapshotStore.read()
+
+        scratch.endVisit(visit, outcome: .stopped, ending: .fullness)
+        LiveActivityController.shared.publishSnapshot(visit: visit, state: live)
+        let after = MealSnapshotStore.read()
+
+        let wasActive = during?.isActive == true
+        let nowEnded = after?.isActive == false
+        checks.append(("the snapshot reads active mid-meal", wasActive))
+        checks.append(("the snapshot stops reading active once the meal ends", nowEnded))
+        emit("  mid-meal → isActive \(during.map { "\($0.isActive)" } ?? "nil") · \(during?.venueName ?? "—")")
+        emit("  after endVisit → isActive \(after.map { "\($0.isActive)" } ?? "nil")")
+        emit("\(wasActive ? "✅" : "❌") the widget shows a live meal")
+        emit("\(nowEnded ? "✅" : "❌") the widget stops showing one — it does not dismiss itself")
+
+        MealSnapshotStore.clear()
+
+        emit("→ the control's tile, the Focus row in Settings and the widget on a home")
+        emit("  screen are all device checks; T15/T16/T17 close on the phone")
+        let failures = checks.filter { !$0.1 }.count
+        emit("the minor surfaces are wired: \(failures == 0 ? "PASS" : "FAIL — \(failures) of \(checks.count) checks")")
         emit("")
     }
 
