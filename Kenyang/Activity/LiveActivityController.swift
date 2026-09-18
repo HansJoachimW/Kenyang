@@ -40,6 +40,39 @@ final class LiveActivityController {
         Task { await activity.end(ActivityContent(state: finalState, staleDate: nil), dismissalPolicy: .default) }
     }
 
+    /// Recompute from the store alone. The view model owns the richer version; this is
+    /// the one a Live Activity button can reach, because a background launch for an
+    /// intent has no view model and no scene.
+    func refresh(visit: Visit, store: KenyangStore) {
+        let capacity = CapacityEngine.state(for: visit)
+        let state = Self.state(
+            phase: Self.phase(capacity: capacity,
+                              minutesRemaining: visit.minutesRemaining,
+                              isDegraded: false,
+                              isEating: visit.outcome == .running),
+            capacity: capacity,
+            minutesRemaining: visit.minutesRemaining,
+            roundIndex: store.currentRound(in: visit),
+            nextTarget: store.lastPlan.flatMap { store.nextUnloggedItem(in: $0, visit: visit)?.item.dishName },
+            message: nil
+        )
+        update(state)
+        publishSnapshot(visit: visit, state: state)
+    }
+
+    /// The home-screen widget reads a snapshot, not the store — see `MealSnapshot`.
+    func publishSnapshot(visit: Visit, state: RoundActivityAttributes.ContentState) {
+        MealSnapshotStore.write(
+            MealSnapshot(venueName: visit.restaurant?.name ?? "Kenyang",
+                         fractionRemaining: state.fractionRemaining,
+                         plateEstimate: state.plateEstimate,
+                         roundIndex: state.roundIndex,
+                         nextTarget: state.nextTarget,
+                         isActive: visit.isActive,
+                         updatedAt: .now)
+        )
+    }
+
     // MARK: - The derivation
 
     /// Everything the four states and three presentations render from, in one place.

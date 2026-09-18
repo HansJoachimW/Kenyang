@@ -1,30 +1,7 @@
 import SwiftUI
-import UIKit
 
-enum Palette {
-    static let surface  = adaptive(light: 0xE5E4E2, dark: 0x0A0A0A)
-    static let ink      = adaptive(light: 0x0A0A0A, dark: 0xE5E4E2)
-    static let accent   = adaptive(light: 0x536878, dark: 0x7C93A6)
-    static let safe     = adaptive(light: 0x4A6147, dark: 0xADBDAB)
-    static let excluded = adaptive(light: 0x6F1D1B, dark: 0xC4756F)
-    static let unknown  = adaptive(light: 0x7A5C15, dark: 0xD9A845)
-    static let muted    = adaptive(light: 0x6B6B6B, dark: 0x9A9A9A)
-
-    private static func adaptive(light: UInt32, dark: UInt32) -> Color {
-        Color(uiColor: UIColor { traits in
-            UIColor(rgb: traits.userInterfaceStyle == .dark ? dark : light)
-        })
-    }
-}
-
-private extension UIColor {
-    convenience init(rgb: UInt32) {
-        self.init(red: Double((rgb >> 16) & 0xFF) / 255.0,
-                  green: Double((rgb >> 8) & 0xFF) / 255.0,
-                  blue: Double(rgb & 0xFF) / 255.0,
-                  alpha: 1.0)
-    }
-}
+// The colour tokens moved to Shared/DesignTokens.swift so the widget extension can
+// render the same capacity ring. What stays here extends app-only domain types.
 
 extension ExclusionVerdict {
     var tint: Color {
@@ -50,6 +27,52 @@ extension TraceKind {
         case .modelFailure: Palette.muted
         default:            Palette.accent
         }
+    }
+}
+
+/// Recon outline, exploit fill — the design's third binding rule. Both are Blue Slate,
+/// because the fourth rule says Blue Slate is the only fill and amber only ever means
+/// uncertainty; recon is not uncertainty, it is a deliberate spend. The word carries the
+/// meaning when the colour is not seen.
+struct RoundRoleBadge: View {
+    let isRecon: Bool
+
+    var body: some View {
+        Text(isRecon ? "recon" : "exploit")
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(isRecon ? Palette.accent : Palette.surface)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background {
+                if isRecon {
+                    Capsule().strokeBorder(Palette.accent, lineWidth: 1)
+                } else {
+                    Capsule().fill(Palette.accent)
+                }
+            }
+            .accessibilityLabel(isRecon ? "reconnaissance" : "exploit")
+    }
+}
+
+/// The same rule one level up: what the app COMPUTED is outlined, what the MODEL
+/// produced is filled. The trace panel is the one screen designed for reading, and this
+/// is the distinction it exists to make legible.
+struct AttributionBadge: View {
+    let isDeterministic: Bool
+
+    var body: some View {
+        Text(isDeterministic ? "COMPUTED" : "MODEL")
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(isDeterministic ? Palette.accent : Palette.surface)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background {
+                if isDeterministic {
+                    Capsule().strokeBorder(Palette.accent, lineWidth: 1)
+                } else {
+                    Capsule().fill(Palette.accent)
+                }
+            }
     }
 }
 

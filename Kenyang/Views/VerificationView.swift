@@ -134,6 +134,22 @@ struct VerificationView: View {
                     name: "Retry probe",
                     detail: "Does one retry clear the decode failure?",
                     rendersInApp: false) { await SchemaProbe.retryProbe() },
+            Harness(id: "seed-tier-2",
+                    name: "Seed tier history — 2 visits",
+                    detail: "Screen 2's refusal state. Below three visits it will not argue",
+                    rendersInApp: false) {
+                        TierFixtures.clear(runner.store)
+                        TierFixtures.seed(into: runner.store, visits: 2)
+                        print("[SEED] Gyu-Kaku Kemang · 2 visits — expect the refusal")
+                    },
+            Harness(id: "seed-tier-6",
+                    name: "Seed tier history — 6 visits",
+                    detail: "Screen 2's confident state, with a premium rung that never earned it",
+                    rendersInApp: false) {
+                        TierFixtures.clear(runner.store)
+                        TierFixtures.seed(into: runner.store, visits: 6)
+                        print("[SEED] Gyu-Kaku Kemang · 6 visits — expect Go Standard")
+                    },
             Harness(id: "--branch-battery",
                     name: "Branch battery (TB)",
                     detail: "20 scenarios — does the move track the verdict, or collapse?",

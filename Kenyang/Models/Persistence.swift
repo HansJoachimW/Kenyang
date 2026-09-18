@@ -2,11 +2,15 @@ import Foundation
 import SwiftData
 
 @Model
-final class Restaurant {
+final class Restaurant: Identifiable {
     #Index<Restaurant>([\.name])
     @Attribute(.unique) var name: String
     var pricePerHead: Double = 0
     var tierNames: [String] = []
+    /// Parallel to `tierNames`. The cover price of each tier, captured when that menu is
+    /// first imported — the tier ladder is what Screen 2 argues over, and without prices
+    /// the argument is unarguable. Added with a default, never renamed.
+    var tierPrices: [Double] = []
     var createdAt: Date = Date.now
     @Relationship(deleteRule: .cascade, inverse: \Visit.restaurant) var visits: [Visit]
 
@@ -22,6 +26,13 @@ final class Restaurant {
 
     func tierName(rank: Int) -> String {
         tierNames.indices.contains(rank) ? tierNames[rank] : "Tier \(rank + 1)"
+    }
+
+    /// `.sheet(item:)` needs this; the venue name is already `@Attribute(.unique)`.
+    var id: String { name }
+
+    func tierPrice(rank: Int) -> Double? {
+        tierPrices.indices.contains(rank) ? tierPrices[rank] : nil
     }
 }
 

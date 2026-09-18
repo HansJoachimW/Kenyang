@@ -3,10 +3,13 @@ import SwiftUI
 struct RootView: View {
     @Environment(\.kenyangStore) private var store
     @State private var model: SessionViewModel?
+    @AppStorage("onboarding.completed") private var onboarded = false
 
     var body: some View {
         Group {
-            if let model {
+            if !onboarded {
+                OnboardingView { onboarded = true }
+            } else if let model {
                 SessionView(model: model)
             } else {
                 ProgressView().task { model = SessionViewModel(store: store) }
@@ -25,13 +28,15 @@ struct SessionView: View {
             Group {
                 switch model.phase {
                 case .idle:              StartView(model: model)
-                case .planning:          PlanningView()
+                case .planning:          PlanningView(model: model)
                 case .awaitingApproval:  PlanView(model: model)
                 case .eating:            EatingView(model: model)
                 case .stopped(let m):    TerminalView(title: "Stop here", message: m, model: model)
                 case .declined(let m):   TerminalView(title: "Nothing to optimise", message: m, model: model)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Palette.surface)
             .navigationTitle("Kenyang")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -48,12 +53,24 @@ struct SessionView: View {
                 VerificationView()
             }
         }
+        // Blue Slate is the only fill the design allows, so no control may fall back to
+        // the system's blue.
+        .tint(Palette.accent)
     }
 }
 
 struct StartView: View {
+    @Environment(\.kenyangStore) private var store
     let model: SessionViewModel
     @State private var showingCapture = false
+    @State private var tierVenue: Restaurant?
+    @AppStorage("onboarding.plates") private var plates: Double = SessionDefaults.plates
+
+    /// Screen 2 belongs to ARRIVAL, before a session exists. It only has something to
+    /// say at a venue that prints more than one menu.
+    private var laddered: [Restaurant] {
+        store.allRestaurants().filter(\.hasTierLadder)
+    }
 
     var body: some View {
         VStack(spacing: 20) {
@@ -68,7 +85,7 @@ struct StartView: View {
                 model.startSession(restaurantName: "Demo Buffet",
                                    pricePerHead: SessionDefaults.pricePerHead,
                                    seatingLimit: SessionDefaults.seatingMinutes,
-                                   plates: SessionDefaults.plates,
+                                   plates: plates,
                                    spread: DemoSpread.standard)
             }
             .buttonStyle(.borderedProminent)
@@ -76,26 +93,110 @@ struct StartView: View {
             Button("Capture a menu") { showingCapture = true }
                 .font(.footnote)
                 .tint(Palette.accent)
+
+            ForEach(laddered, id: \.name) { venue in
+                Button("Before you order at \(venue.name)") { tierVenue = venue }
+                    .font(.footnote)
+                    .tint(Palette.accent)
+            }
         }
         .padding()
+        .sheet(item: $tierVenue) { venue in
+            TierRecommendationView(restaurant: venue) { rank in
+                tierVenue = nil
+                model.startSession(restaurantName: venue.name,
+                                   pricePerHead: venue.tierPrice(rank: rank) ?? venue.pricePerHead,
+                                   seatingLimit: SessionDefaults.seatingMinutes,
+                                   plates: plates,
+                                   spread: DemoSpread.standard)
+            } onOverride: {
+                tierVenue = nil
+            }
+        }
         .sheet(isPresented: $showingCapture) {
             MenuCaptureView { menu in
                 model.startSession(restaurantName: menu.venueName,
                                    pricePerHead: menu.pricePerHead,
                                    seatingLimit: SessionDefaults.seatingMinutes,
-                                   plates: SessionDefaults.plates,
+                                   plates: plates,
                                    spread: menu.spread)
             }
         }
     }
 }
 
+/// Screen 4 — the wait.
+///
+/// A single indeterminate bar would misrepresent this by an order of magnitude: the
+/// first stage is up to ten times the second. So each stage is named, states its own
+/// question and reports its own measured ceiling, completed stages collapse to one line
+/// and stay, and the escape sits in the same place throughout.
+///
+/// Three things move and nothing else: a tool line appearing when it returns, a stage
+/// collapsing to a completed line, and the next question replacing the last. Each is
+/// information arriving, not decoration.
 struct PlanningView: View {
+    let model: SessionViewModel
+
     var body: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-            Text("Working out where the value is").font(.footnote).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 20) {
+            ForEach(model.progress.completed) { done in
+                HStack(spacing: 8) {
+                    Text(done.stage.label)
+                        .font(.caption.weight(.semibold)).tracking(0.6)
+                        .foregroundStyle(Palette.muted)
+                    Text("✓ \(String(format: "%.1f", done.seconds)) s")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(Palette.muted)
+                }
+            }
+
+            if let stage = model.progress.current {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 8) {
+                        Circle().fill(Palette.accent).frame(width: 7, height: 7)
+                        Text(stage.label)
+                            .font(.caption.weight(.semibold)).tracking(0.6)
+                            .foregroundStyle(Palette.accent)
+                    }
+                    Text(stage.question)
+                        .font(.title3.weight(.medium))
+                        .foregroundStyle(Palette.ink)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(model.progress.toolLines, id: \.self) { line in
+                            Text(line)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(line.hasSuffix("insufficient") ? Palette.unknown : Palette.muted)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .transition(.opacity)
+                        }
+                    }
+
+                    Divider().padding(.top, 4)
+                    HStack {
+                        Text("\(model.progress.stageNumber) OF \(model.progress.stageTotal)")
+                        Spacer()
+                        Text(stage.ceiling)
+                    }
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(Palette.muted)
+                }
+                .animation(.easeOut(duration: 0.24), value: model.progress.toolLines)
+            }
+
+            Spacer()
+
+            // Same place on every stage — the diner must be able to leave at any point
+            // and still get a plan.
+            Button("Skip and plan from priors") { model.skipToPriors() }
+                .buttonStyle(.bordered)
+                .tint(Palette.accent)
+                .frame(maxWidth: .infinity)
         }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeOut(duration: 0.24), value: model.progress.completed.count)
     }
 }
 
@@ -129,11 +230,7 @@ struct PlanView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(item.isRecon ? "recon" : "exploit")
-                            .font(.caption2)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(item.isRecon ? .orange.opacity(0.2) : .green.opacity(0.2))
-                            .clipShape(Capsule())
+                        RoundRoleBadge(isRecon: item.isRecon)
                     }
                 }
             }
@@ -170,8 +267,8 @@ struct HeldBackRow: View {
                 HStack {
                     Text("Contains \(term)?").font(.footnote).foregroundStyle(.secondary)
                     Spacer()
-                    Button("No")  { Task { await model.answer(term, contains: false, for: dish) } }
-                    Button("Yes") { Task { await model.answer(term, contains: true,  for: dish) } }
+                    Button("No")  { model.answer(term, contains: false, for: dish) }
+                    Button("Yes") { model.answer(term, contains: true,  for: dish) }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -209,7 +306,7 @@ struct EatingView: View {
                 }
             }
             Section {
-                Button("Plan the next round") { Task { await model.nextRound() } }
+                Button("Plan the next round") { model.nextRound() }
                 Button("End the meal") { model.endSession() }
             }
         }
@@ -241,11 +338,7 @@ struct TraceView: View {
                     HStack {
                         Text(entry.title).font(.subheadline.bold())
                         Spacer()
-                        Text(entry.isDeterministic ? "computed" : "model")
-                            .font(.caption2)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(entry.isDeterministic ? .blue.opacity(0.15) : .purple.opacity(0.15))
-                            .clipShape(Capsule())
+                        AttributionBadge(isDeterministic: entry.isDeterministic)
                     }
                     Text(entry.detail).font(.caption).foregroundStyle(.secondary)
                 }

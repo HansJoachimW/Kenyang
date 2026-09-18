@@ -32,8 +32,26 @@ actor ToolContext {
         self.hypothesisCategory = hypothesisCategory
     }
 
+    /// Lets the wait screen show a tool line the moment it returns rather than after
+    /// the whole stage finishes. Set by the view model for the duration of a round and
+    /// cleared afterwards, so nothing holds a reference to a screen that is gone.
+    private var observer: (@Sendable (String, String) -> Void)?
+
+    func observe(_ observer: (@Sendable (String, String) -> Void)?) {
+        self.observer = observer
+    }
+
     func resetInvocations() { invoked = [] }
+
     func note(_ name: String) { invoked.insert(name) }
+
+    /// Tools call this on the way out, so the result — including a refusal — is what
+    /// reaches the screen.
+    func note(_ name: String, result: String) {
+        invoked.insert(name)
+        observer?(name, result)
+    }
+
     var invocationList: [String] { invoked.sorted() }
 }
 
@@ -46,7 +64,11 @@ struct GetSpreadTool: Tool {
     func call(arguments: Arguments) async throws -> String {
         await ToolContext.shared.note(name)
         let sightings = await ToolContext.shared.sightings
-        guard !sightings.isEmpty else { return "no dishes recorded" }
+        guard !sightings.isEmpty else {
+            await ToolContext.shared.note(name, result: "no dishes")
+            return "no dishes recorded"
+        }
+        await ToolContext.shared.note(name, result: "\(sightings.count) items")
         return sightings.map { s in
             var line = "\(s.name) [\(s.category.rawValue)]"
             if s.tierRank > 0 { line += " TIER \(s.tierRank + 1)" }
@@ -70,8 +92,10 @@ struct GetPosteriorTool: Tool {
         let events = await ToolContext.shared.events
         let p = ValueEngine.categoryPosterior(arguments.category, events: events)
         guard StatisticalGuard.canClaim(p) else {
+            await ToolContext.shared.note(name, result: "insufficient")
             return "\(arguments.category.rawValue): insufficient data (n=\(p.sampleCount))"
         }
+        await ToolContext.shared.note(name, result: "n=\(p.sampleCount)")
         return "\(arguments.category.rawValue): mean=\(String(format: "%.2f", p.mean)) n=\(p.sampleCount)"
     }
 }
@@ -92,10 +116,12 @@ struct EvaluateHypothesisTool: Tool {
         let events = await ToolContext.shared.events
         let p = ValueEngine.categoryPosterior(arguments.category, events: events)
         guard p.sampleCount >= ValueEngine.minimumSamples else {
+            await ToolContext.shared.note(name, result: "insufficient")
             return "evaluateHypothesis(\(arguments.category.rawValue)) = insufficient (n=\(p.sampleCount))"
         }
         let expected = arguments.expectedRating.score
         let verdict: HypothesisVerdict = p.mean >= expected - 0.25 ? .supported : .contradicted
+        await ToolContext.shared.note(name, result: verdict.rawValue)
         return "evaluateHypothesis(\(arguments.category.rawValue)) = \(verdict.rawValue) (observed \(String(format: "%.2f", p.mean)) vs expected \(String(format: "%.2f", expected)), n=\(p.sampleCount))"
     }
 }
@@ -111,6 +137,7 @@ struct CheckCapacityModelTool: Tool {
         let capacity = await ToolContext.shared.capacity
         let readings = await ToolContext.shared.fullnessReadings
         guard let latest = readings.sorted(by: { $0.at < $1.at }).last else {
+            await ToolContext.shared.note(name, result: "insufficient")
             return "checkCapacityModel = insufficient (no fullness reading this meal; the budget is an unverified estimate)"
         }
         let predicted = CapacityEngine.predictedFullness(
@@ -118,6 +145,7 @@ struct CheckCapacityModelTool: Tool {
         let delta = latest.value - predicted
         let verdict: CapacityVerdict = delta >= 2 ? .overestimating
             : delta <= -2 ? .underestimating : .consistent
+        await ToolContext.shared.note(name, result: verdict.rawValue)
         return "checkCapacityModel = \(verdict.rawValue) (predicted fullness \(predicted)/5, diner reported \(latest.value)/5)"
     }
 }
@@ -133,6 +161,7 @@ struct GetRemainingCapacityTool: Tool {
         let capacity = await ToolContext.shared.capacity
         let minutes = await ToolContext.shared.minutesRemaining
         let time = minutes.map { "\($0) minutes of seating left" } ?? "no seating limit"
+        await ToolContext.shared.note(name, result: "\(String(format: "%.1f", capacity.plateEstimate)) plates")
         return "about \(String(format: "%.1f", capacity.plateEstimate)) plates left; \(time)"
     }
 }
@@ -148,6 +177,7 @@ struct GetBasisCalibrationTool: Tool {
         let records = await ToolContext.shared.basisRecords
         let minimum = 8
         guard records.count >= minimum else {
+            await ToolContext.shared.note(name, result: "insufficient")
             return "getBasisCalibration = insufficient (n=\(records.count), need \(minimum)). Use population priors."
         }
         let grouped = Dictionary(grouping: records, by: \.basis)
@@ -155,6 +185,7 @@ struct GetBasisCalibrationTool: Tool {
             let err = rows.reduce(0.0) { $0 + $1.absoluteError } / Double(rows.count)
             return "\(basis.rawValue): n=\(rows.count) meanError=\(String(format: "%.2f", err))"
         }
+        await ToolContext.shared.note(name, result: "n=\(records.count)")
         return lines.joined(separator: "; ")
     }
 }
@@ -168,7 +199,11 @@ struct GetConstraintsTool: Tool {
     func call(arguments: Arguments) async throws -> String {
         await ToolContext.shared.note(name)
         let exclusions = await ToolContext.shared.exclusions
-        guard !exclusions.isEmpty else { return "no exclusions set" }
+        guard !exclusions.isEmpty else {
+            await ToolContext.shared.note(name, result: "none set")
+            return "no exclusions set"
+        }
+        await ToolContext.shared.note(name, result: "\(exclusions.count) to avoid")
         return "must avoid: \(exclusions.joined(separator: ", "))"
     }
 }
@@ -182,7 +217,11 @@ struct GetVisitHistoryTool: Tool {
     func call(arguments: Arguments) async throws -> String {
         await ToolContext.shared.note(name)
         let events = await ToolContext.shared.events
-        guard !events.isEmpty else { return "no previous visits recorded" }
+        guard !events.isEmpty else {
+            await ToolContext.shared.note(name, result: "no history")
+            return "no previous visits recorded"
+        }
+        await ToolContext.shared.note(name, result: "\(events.count) rated")
         let byCategory = Dictionary(grouping: events, by: \.category)
         return byCategory.map { category, rows in
             let mean = rows.reduce(0.0) { $0 + $1.rating.score } / Double(rows.count)

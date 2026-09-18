@@ -11,7 +11,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class VerificationRunner {
-    private let store: KenyangStore
+    let store: KenyangStore
     var lines: [String] = []
     var running = false
 

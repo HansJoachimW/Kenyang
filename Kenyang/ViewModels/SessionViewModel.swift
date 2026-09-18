@@ -17,6 +17,8 @@ final class SessionViewModel {
     private let store: KenyangStore
     let trace: TraceLog
     private let agent: RoundAgent
+    let progress = AgentProgress()
+    private var planningTask: Task<Void, Never>?
 
     var phase: Phase = .idle
     var visit: Visit?
@@ -32,7 +34,7 @@ final class SessionViewModel {
         let log = trace ?? TraceLog()
         self.store = store
         self.trace = log
-        self.agent = RoundAgent(trace: log)
+        self.agent = RoundAgent(trace: log, progress: progress)
         self.visit = store.activeVisit()
         if visit != nil { phase = .eating }
     }
@@ -64,7 +66,7 @@ final class SessionViewModel {
     /// The diner asked staff and came back with an answer. Re-planning afterwards is
     /// the point: a dish cleared mid-round should become plannable in that round, not
     /// the next one.
-    func answer(_ term: String, contains: Bool, for sighting: DishSighting) async {
+    func answer(_ term: String, contains: Bool, for sighting: DishSighting) {
         if contains {
             store.flagExclusion(term, for: sighting)
         } else {
@@ -74,7 +76,7 @@ final class SessionViewModel {
                      title: "exclusion resolved",
                      detail: "\(sighting.name) · \(term) → \(contains ? "contains it" : "cleared by the diner")",
                      deterministic: true)
-        await planRound()
+        beginPlanning()
     }
 
     func startSession(restaurantName: String,
@@ -95,13 +97,48 @@ final class SessionViewModel {
         // goes stale. Hooking it to menu capture alone left a demo session unindexed
         // until the next launch.
         Task { await SpotlightIndexer.reindex(store) }
-        Task { await planRound() }
+        beginPlanning()
+    }
+
+    /// The escape the design puts on every stage. Thirty seconds is longer than the
+    /// three-second budget allows, so the diner has to be able to leave at any point and
+    /// still get a plan — the same one degraded mode produces.
+    private func beginPlanning() {
+        planningTask?.cancel()
+        planningTask = Task { [weak self] in await self?.planRound() }
+    }
+
+    func skipToPriors() {
+        guard let visit, phase == .planning else { return }
+        planningTask?.cancel()
+        planningTask = nil
+        trace.record(kind: .guardrail,
+                     title: "skipped to priors",
+                     detail: "The diner left the wait. Planning from population priors instead of a composed hypothesis.",
+                     deterministic: true)
+        hypothesis = nil
+        intent = nil
+        plan = RoundPlanner.plan(objective: .balanced,
+                                 candidates: visit.sightings,
+                                 events: visit.tasteEvents,
+                                 capacity: CapacityEngine.state(for: visit),
+                                 exclusions: store.exclusions())
+        degradedMessage = "Planned from priors — you skipped the agent."
+        phase = .awaitingApproval
     }
 
     func planRound() async {
         guard let visit else { return }
         phase = .planning
         degradedMessage = nil
+        progress.reset()
+
+        // The tools publish as they return, so the wait screen shows what was actually
+        // asked rather than a list of what might be.
+        await ToolContext.shared.observe { [progress] name, result in
+            Task { @MainActor in progress.note(tool: name, result: result) }
+        }
+        defer { Task { await ToolContext.shared.observe(nil) } }
 
         let input = AgentInput(sightings: visit.sightings,
                                events: visit.tasteEvents,
@@ -112,7 +149,10 @@ final class SessionViewModel {
                                roundIndex: roundIndex,
                                currentHypothesis: hypothesis)
 
-        switch await agent.run(input) {
+        let outcome = await agent.run(input)
+        guard !Task.isCancelled, phase == .planning else { return }
+
+        switch outcome {
         case .declined(let message):
             store.endVisit(visit, outcome: .declined)
             pathSignatures.append(trace.pathSignature)
@@ -170,6 +210,7 @@ final class SessionViewModel {
         } else {
             LiveActivityController.shared.start(venue: visit.restaurant?.name ?? "Buffet", state: state)
         }
+        LiveActivityController.shared.publishSnapshot(visit: visit, state: state)
     }
 
     func rate(_ item: PlannedItem, rating: Rating) {
@@ -218,9 +259,9 @@ final class SessionViewModel {
         syncActivity()
     }
 
-    func nextRound() async {
+    func nextRound() {
         roundIndex += 1
-        await planRound()
+        beginPlanning()
     }
 
     func endSession() {

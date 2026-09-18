@@ -11,6 +11,47 @@ struct KenyangApp: App {
         let store = KenyangStore(container: container)
         self.store = store
         AppDependencyManager.shared.add(dependency: store)
+
+        // A Live Activity button's `perform()` runs in THIS process, so the handler has
+        // to be registered before any of them can fire. `init` is the only place that
+        // is true for a background launch, where there is no scene and no `.task`.
+        MainActor.assumeIsolated {
+            ActivityBridge.shared.register { command in
+                Self.handle(command, store: store)
+            }
+        }
+    }
+
+    @MainActor
+    private static func handle(_ command: ActivityCommand, store: KenyangStore) {
+        guard let visit = store.activeVisit() else { return }
+        switch command {
+        case .stop:
+            // A one-tap Stop cannot know WHY the meal ended, and only a `fullness`
+            // ending measures capacity. Recording `.unknown` keeps it an honest lower
+            // bound instead of feeding the fit an observation nobody made.
+            store.endVisit(visit, outcome: .stopped, ending: .unknown)
+            LiveActivityController.shared.end(
+                LiveActivityController.state(phase: .stopGuard,
+                                             capacity: CapacityEngine.state(for: visit),
+                                             minutesRemaining: visit.minutesRemaining,
+                                             roundIndex: store.currentRound(in: visit),
+                                             nextTarget: nil,
+                                             message: "Meal ended.")
+            )
+        case .rateGood, .rateSkip:
+            // Unlike the Action Button this rates, because the Island names the dish
+            // directly above the buttons — the diner can see what they are answering.
+            guard let plan = store.lastPlan,
+                  let next = store.nextUnloggedItem(in: plan, visit: visit) else { return }
+            store.rate(dishName: next.item.dishName,
+                       category: next.item.category,
+                       rating: command == .rateGood ? .good : .skip,
+                       portion: next.item.portion,
+                       in: visit,
+                       roundIndex: store.currentRound(in: visit))
+            LiveActivityController.shared.refresh(visit: visit, store: store)
+        }
     }
 
     var body: some Scene {

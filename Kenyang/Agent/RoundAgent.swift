@@ -24,13 +24,16 @@ enum AgentOutcome: Sendable {
 final class RoundAgent {
     private let trace: TraceLog
     private var budget = LoopBudget()
+    /// Optional, because the harnesses run the agent with no screen attached.
+    private let progress: AgentProgress?
 
     /// The budget is injectable so the battery can exhaust it without waiting six real
     /// rounds for the model. Same reason `MenuItemEntityQuery` takes a store: a check
     /// that can be written but never run is the failure `TESTS.md` exists to prevent.
-    init(trace: TraceLog, budget: LoopBudget = LoopBudget()) {
+    init(trace: TraceLog, budget: LoopBudget = LoopBudget(), progress: AgentProgress? = nil) {
         self.trace = trace
         self.budget = budget
+        self.progress = progress
     }
 
     func run(_ input: AgentInput) async -> AgentOutcome {
@@ -140,6 +143,8 @@ final class RoundAgent {
 
     private func hypothesise(input: AgentInput, excluding dead: MenuCategory? = nil) async -> ValueHypothesis? {
         guard consume("hypothesise") else { return nil }
+        progress?.begin(.hypothesise)
+        defer { progress?.finish(.hypothesise) }
         let session = AgentCapabilities.session(tools: AgentToolbox.readTools,
                                                 instructions: Self.instructions)
         do {
@@ -191,6 +196,8 @@ final class RoundAgent {
 
     private func decide(_ hypothesis: ValueHypothesis, input: AgentInput) async -> ValueHypothesis {
         guard consume("decide") else { return hypothesis }
+        progress?.begin(.decide)
+        defer { progress?.finish(.decide) }
 
         let verdict = deterministicVerdict(hypothesis, events: input.events)
         trace.record(kind: .verdict,
@@ -261,6 +268,8 @@ final class RoundAgent {
 
     private func setIntent(hypothesis: ValueHypothesis, input: AgentInput) async -> RoundIntent? {
         guard consume("setIntent") else { return nil }
+        progress?.begin(.setIntent)
+        defer { progress?.finish(.setIntent) }
         let names = input.sightings.map(\.name).joined(separator: ", ")
         let session = AgentCapabilities.session(instructions: Self.instructions)
         do {

@@ -6,11 +6,74 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		902EBF93305CEA41006A5AC2 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 902EBF92305CEA41006A5AC2 /* WidgetKit.framework */; };
+		902EBF95305CEA41006A5AC2 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 902EBF94305CEA41006A5AC2 /* SwiftUI.framework */; };
+		902EBFA4305CEA42006A5AC2 /* KenyangWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 902EBF90305CEA41006A5AC2 /* KenyangWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		902EBFA2305CEA42006A5AC2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 90C25BA130496E9900A06430 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 902EBF8F305CEA41006A5AC2;
+			remoteInfo = KenyangWidgetsExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		902EBFA9305CEA42006A5AC2 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				902EBFA4305CEA42006A5AC2 /* KenyangWidgetsExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		902EBF90305CEA41006A5AC2 /* KenyangWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = KenyangWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		902EBF92305CEA41006A5AC2 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		902EBF94305CEA41006A5AC2 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		90C25BA930496E9900A06430 /* Kenyang.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kenyang.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		902EBFA5305CEA42006A5AC2 /* Exceptions for "KenyangWidgets" folder in "KenyangWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 902EBF8F305CEA41006A5AC2 /* KenyangWidgetsExtension */;
+		};
+		902EBFBA305CEA69006A5AC2 /* Exceptions for "KenyangWidgets" folder in "Kenyang" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Shared/ActivityBridge.swift,
+				Shared/CapacityRing.swift,
+				Shared/DesignTokens.swift,
+				Shared/MealSnapshot.swift,
+				Shared/RoundActivityAttributes.swift,
+			);
+			target = 90C25BA830496E9900A06430 /* Kenyang */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		902EBF96305CEA41006A5AC2 /* KenyangWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				902EBFBA305CEA69006A5AC2 /* Exceptions for "KenyangWidgets" folder in "Kenyang" target */,
+				902EBFA5305CEA42006A5AC2 /* Exceptions for "KenyangWidgets" folder in "KenyangWidgetsExtension" target */,
+			);
+			path = KenyangWidgets;
+			sourceTree = "<group>";
+		};
 		90C25BAB30496E9900A06430 /* Kenyang */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Kenyang;
@@ -19,6 +82,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		902EBF8D305CEA41006A5AC2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				902EBF95305CEA41006A5AC2 /* SwiftUI.framework in Frameworks */,
+				902EBF93305CEA41006A5AC2 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		90C25BA630496E9900A06430 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -29,10 +101,21 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		902EBF91305CEA41006A5AC2 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				902EBF92305CEA41006A5AC2 /* WidgetKit.framework */,
+				902EBF94305CEA41006A5AC2 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		90C25BA030496E9900A06430 = {
 			isa = PBXGroup;
 			children = (
 				90C25BAB30496E9900A06430 /* Kenyang */,
+				902EBF96305CEA41006A5AC2 /* KenyangWidgets */,
+				902EBF91305CEA41006A5AC2 /* Frameworks */,
 				90C25BAA30496E9900A06430 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +124,7 @@
 			isa = PBXGroup;
 			children = (
 				90C25BA930496E9900A06430 /* Kenyang.app */,
+				902EBF90305CEA41006A5AC2 /* KenyangWidgetsExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,6 +132,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		902EBF8F305CEA41006A5AC2 /* KenyangWidgetsExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 902EBFA6305CEA42006A5AC2 /* Build configuration list for PBXNativeTarget "KenyangWidgetsExtension" */;
+			buildPhases = (
+				902EBF8C305CEA41006A5AC2 /* Sources */,
+				902EBF8D305CEA41006A5AC2 /* Frameworks */,
+				902EBF8E305CEA41006A5AC2 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				902EBF96305CEA41006A5AC2 /* KenyangWidgets */,
+			);
+			name = KenyangWidgetsExtension;
+			packageProductDependencies = (
+			);
+			productName = KenyangWidgetsExtension;
+			productReference = 902EBF90305CEA41006A5AC2 /* KenyangWidgetsExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		90C25BA830496E9900A06430 /* Kenyang */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 90C25BB630496E9900A06430 /* Build configuration list for PBXNativeTarget "Kenyang" */;
@@ -55,10 +161,12 @@
 				90C25BA530496E9900A06430 /* Sources */,
 				90C25BA630496E9900A06430 /* Frameworks */,
 				90C25BA730496E9900A06430 /* Resources */,
+				902EBFA9305CEA42006A5AC2 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				902EBFA3305CEA42006A5AC2 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				90C25BAB30496E9900A06430 /* Kenyang */,
@@ -77,9 +185,12 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2660;
+				LastSwiftUpdateCheck = 2700;
 				LastUpgradeCheck = 2660;
 				TargetAttributes = {
+					902EBF8F305CEA41006A5AC2 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 					90C25BA830496E9900A06430 = {
 						CreatedOnToolsVersion = 26.6;
 					};
@@ -100,11 +211,19 @@
 			projectRoot = "";
 			targets = (
 				90C25BA830496E9900A06430 /* Kenyang */,
+				902EBF8F305CEA41006A5AC2 /* KenyangWidgetsExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		902EBF8E305CEA41006A5AC2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		90C25BA730496E9900A06430 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -115,6 +234,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		902EBF8C305CEA41006A5AC2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		90C25BA530496E9900A06430 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -124,7 +250,77 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		902EBFA3305CEA42006A5AC2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 902EBF8F305CEA41006A5AC2 /* KenyangWidgetsExtension */;
+			targetProxy = 902EBFA2305CEA42006A5AC2 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		902EBFA7305CEA42006A5AC2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NDGX4SV6M6;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = KenyangWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = KenyangWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hansjoachim.Kenyang.KenyangWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		902EBFA8305CEA42006A5AC2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NDGX4SV6M6;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = KenyangWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = KenyangWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hansjoachim.Kenyang.KenyangWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		90C25BB430496E9900A06430 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -315,6 +511,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		902EBFA6305CEA42006A5AC2 /* Build configuration list for PBXNativeTarget "KenyangWidgetsExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				902EBFA7305CEA42006A5AC2 /* Debug */,
+				902EBFA8305CEA42006A5AC2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		90C25BA430496E9900A06430 /* Build configuration list for PBXProject "Kenyang" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

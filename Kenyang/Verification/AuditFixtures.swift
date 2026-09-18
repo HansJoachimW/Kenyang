@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 /// Inputs for the context audit (TESTS.md T50/T51/T52).
 ///
@@ -143,4 +144,74 @@ enum Fixtures {
             "Fruit Platter", "Dorayaki", "Chocolate Lava Cake", "Anmitsu"
         ])
     ]
+}
+
+/// Seeded history for Screen 2.
+///
+/// The tier recommendation refuses below three visits, so on a fresh install the only
+/// reachable state is the refusal. That is correct behaviour and it is also the harder
+/// state to photograph an argument from, so both are made reachable here rather than
+/// left to a diner who has eaten somewhere six times.
+@MainActor
+enum TierFixtures {
+    static let venue = "Gyu-Kaku Kemang"
+
+    /// `visits` completed meals at a two-rung venue. Two gives the refusal, six gives
+    /// the argument.
+    @discardableResult
+    static func seed(into store: KenyangStore, visits: Int) -> Restaurant {
+        _ = store.tierRank(of: "Standard", venue: venue, pricePerHead: 248_800)
+        _ = store.tierRank(of: "Premium", venue: venue, pricePerHead: 449_800)
+
+        for index in 0..<visits {
+            let visit = store.startVisit(restaurantName: venue,
+                                         pricePerHead: 449_800,
+                                         seatingLimitMinutes: 90,
+                                         maxSatiety: SessionDefaults.maxSatiety)
+            visit.startedAt = .now.addingTimeInterval(-Double(visits - index) * 7 * 86_400)
+            store.addSightings([
+                (name: "Gyu-Kaku Karubi", category: .meat, printed: "STANDARD MEAT", tier: 0),
+                (name: "Beef Harami", category: .meat, printed: "STANDARD MEAT", tier: 0),
+                (name: "Chicken Momo Miso", category: .meat, printed: "STANDARD MEAT", tier: 0),
+                (name: "Kaisou Salad", category: .vegetable, printed: "SALAD", tier: 0),
+                (name: "Garlic Rice", category: .starch, printed: "RICE & NOODLE", tier: 0),
+                (name: "Salmon Nigiri", category: .raw, printed: "SUSHI", tier: 0),
+                (name: "Wagyu Karubi", category: .meat, printed: "PREMIUM MEAT", tier: 1),
+                (name: "Wagyu Zabuton", category: .meat, printed: "PREMIUM MEAT", tier: 1)
+            ], to: visit)
+
+            // A whole meal, not a tasting. `fittedMax` averages cumulative satiety, so a
+            // three-dish fixture produced a capacity of 0.7 plates — arithmetically
+            // right and obviously absurd, which is a fixture failing rather than the
+            // engine.
+            let meal: [(String, MenuCategory, Rating)] = [
+                ("Gyu-Kaku Karubi", .meat, .good),
+                ("Beef Harami", .meat, .good),
+                ("Chicken Momo Miso", .meat, .fine),
+                ("Kaisou Salad", .vegetable, .good),
+                ("Garlic Rice", .starch, .fine),
+                ("Salmon Nigiri", .raw, .good)
+            ]
+            for (round, dish) in meal.enumerated() {
+                store.rate(dishName: dish.0, category: dish.1, rating: dish.2,
+                           portion: .normal, in: visit, roundIndex: round / 3 + 1)
+            }
+
+            // The shape the screen exists to name: the premium rung is bought every
+            // time and never rated better than the standard one.
+            store.rate(dishName: "Wagyu Karubi", category: .meat, rating: .fine,
+                       portion: .normal, in: visit, roundIndex: 2)
+
+            store.recordFullness(4, in: visit)
+            store.endVisit(visit, outcome: .stopped, ending: index % 2 == 0 ? .fullness : .clock)
+        }
+        store.save()
+        return store.findOrCreate(named: venue, pricePerHead: 248_800)
+    }
+
+    static func clear(_ store: KenyangStore) {
+        guard let restaurant = store.restaurant(named: venue) else { return }
+        store.context.delete(restaurant)
+        store.save()
+    }
 }

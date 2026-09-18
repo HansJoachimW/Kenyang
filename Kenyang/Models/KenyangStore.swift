@@ -53,8 +53,16 @@ final class KenyangStore {
     /// something extracted per item. New tiers append, so import the base menu first.
     func tierRank(of tierName: String, venue name: String, pricePerHead: Double) -> Int {
         let restaurant = findOrCreate(named: name, pricePerHead: pricePerHead)
-        if let existing = restaurant.tierNames.firstIndex(of: tierName) { return existing }
+        if let existing = restaurant.tierNames.firstIndex(of: tierName) {
+            // A re-import is the newer price; the ladder is what it costs today.
+            if restaurant.tierPrices.indices.contains(existing) {
+                restaurant.tierPrices[existing] = pricePerHead
+                save()
+            }
+            return existing
+        }
         restaurant.tierNames.append(tierName)
+        restaurant.tierPrices.append(pricePerHead)
         save()
         return restaurant.tierNames.count - 1
     }

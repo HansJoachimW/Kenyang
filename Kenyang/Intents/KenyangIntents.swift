@@ -279,65 +279,6 @@ struct EndMealIntent: AppIntent {
     }
 }
 
-/// Asking staff happens at the table, standing up, phone in the other hand. Typing the
-/// answer into a list is the wrong shape for that moment — saying it is the right one.
-///
-/// The dish resolves against `MenuItemEntity`, so Siri asks *which dish* rather than
-/// guessing, which is the same closed-set rule that makes a mispronounced name safe.
-struct ConfirmIngredientIntent: AppIntent {
-    static var title: LocalizedStringResource = "Answer an ingredient question"
-    static var description = IntentDescription("Record what staff said about a dish you are avoiding something in.")
-    static var openAppWhenRun = false
-
-    @Parameter(title: "Dish")
-    var item: MenuItemEntity
-
-    @Parameter(title: "Ingredient")
-    var ingredient: String
-
-    @Parameter(title: "Does it contain it?")
-    var contains: Bool
-
-    @Dependency private var store: KenyangStore
-
-    static var parameterSummary: some ParameterSummary {
-        Summary("\(\.$item) contains \(\.$ingredient): \(\.$contains)")
-    }
-
-    @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        guard let visit = store.activeVisit() else {
-            return .result(dialog: "No meal in progress.")
-        }
-        guard let sighting = visit.sightings.first(where: {
-            $0.name.caseInsensitiveCompare(item.name) == .orderedSame
-        }) else {
-            return .result(dialog: "\(item.name) is not on this menu.")
-        }
-
-        // The exclusion list is an input, never an inference: an answer about something
-        // the diner is not avoiding is recorded nowhere, because there is nothing it
-        // could change.
-        let known = store.exclusions()
-        let term = ingredient.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard known.contains(where: { $0 == term }) else {
-            return .result(dialog: "You are not avoiding \(ingredient), so that does not change anything.")
-        }
-
-        if contains {
-            store.flagExclusion(term, for: sighting)
-            return .result(dialog: "Noted — \(sighting.name) is out.")
-        }
-        store.clearExclusion(term, for: sighting)
-
-        let stillOpen = ExclusionValidator.unresolvedTerms(for: sighting, exclusions: known)
-        if stillOpen.isEmpty {
-            return .result(dialog: "\(sighting.name) is back in — I can plan it now.")
-        }
-        return .result(dialog: "Noted. Still need to know about \(stillOpen.joined(separator: " and ")).")
-    }
-}
-
 // MARK: - The interactive snippet
 //
 // The pass bar is sharper than "the buttons work": **Accept must update the snippet in
@@ -407,6 +348,9 @@ struct AcceptRoundIntent: AppIntent {
     static var title: LocalizedStringResource = "Accept the round"
     static var description = IntentDescription("Agree to eat the planned round.")
     static var openAppWhenRun = false
+    // Backs a button on a surface that already names it. Listing it in
+    // Shortcuts would offer an action with no context to act on.
+    static var isDiscoverable = false
 
     @Dependency private var store: KenyangStore
 
@@ -426,6 +370,9 @@ struct RequestStopIntent: AppIntent {
     static var title: LocalizedStringResource = "Stop the meal"
     static var description = IntentDescription("Ask why the meal is ending, then end it.")
     static var openAppWhenRun = false
+    // Backs a button on a surface that already names it. Listing it in
+    // Shortcuts would offer an action with no context to act on.
+    static var isDiscoverable = false
 
     @Dependency private var store: KenyangStore
 
@@ -442,6 +389,9 @@ struct ResumeRoundIntent: AppIntent {
     static var title: LocalizedStringResource = "Keep eating"
     static var description = IntentDescription("Dismiss the stop prompt and carry on.")
     static var openAppWhenRun = false
+    // Backs a button on a surface that already names it. Listing it in
+    // Shortcuts would offer an action with no context to act on.
+    static var isDiscoverable = false
 
     @Dependency private var store: KenyangStore
 
@@ -457,6 +407,9 @@ struct AdjustRoundIntent: AppIntent {
     static var title: LocalizedStringResource = "Adjust the round"
     static var description = IntentDescription("Ask the agent to plan the round differently.")
     static var openAppWhenRun = false
+    // Backs a button on a surface that already names it. Listing it in
+    // Shortcuts would offer an action with no context to act on.
+    static var isDiscoverable = false
 
     @Dependency private var store: KenyangStore
 
@@ -644,11 +597,6 @@ struct KenyangShortcuts: AppShortcutsProvider {
                               "Next plate in \(.applicationName)"],
                     shortTitle: "Log next item",
                     systemImageName: "circle.badge.checkmark")
-        AppShortcut(intent: ConfirmIngredientIntent(),
-                    phrases: ["Answer an ingredient question in \(.applicationName)",
-                              "Staff checked an ingredient in \(.applicationName)"],
-                    shortTitle: "Ingredient answer",
-                    systemImageName: "checkmark.shield")
         AppShortcut(intent: StartSessionIntent(),
                     phrases: ["Start a buffet in \(.applicationName)",
                               "Start a session in \(.applicationName)"],
