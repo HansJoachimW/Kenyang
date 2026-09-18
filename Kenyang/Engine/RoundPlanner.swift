@@ -7,6 +7,13 @@ struct PlannedItem: Identifiable, Sendable {
     let portion: PortionBucket
     let isRecon: Bool
     let satietyCost: Double
+    /// One line naming the arithmetic that put this dish here. The model contributes the
+    /// claim and the objective; the ordering is beam search over that objective, and the
+    /// screen says which is which rather than letting the plan read as one voice.
+    var reason: String = ""
+    /// How many portions of it. Beam search never repeats a dish, so this is 1 today and
+    /// exists because the row renders it.
+    var quantity: Int = 1
 }
 
 struct RoundPlan: Sendable {
@@ -169,7 +176,8 @@ struct RoundPlanner {
                         category: sighting.category,
                         portion: portion(sighting),
                         isRecon: isRecon(sighting),
-                        satietyCost: cost(sighting))
+                        satietyCost: cost(sighting),
+                        reason: reason(for: sighting, events: events))
         }
 
         return RoundPlan(items: items,
@@ -178,6 +186,23 @@ struct RoundPlanner {
                          posture: objective.posture,
                          deferToStaff: deferToStaff,
                          excludedCount: partition.excluded.count)
+    }
+
+    /// Deterministic, and phrased as arithmetic rather than opinion — an EXPLOIT row
+    /// that cannot say why it was chosen is indistinguishable from a suggestion.
+    private static func reason(for sighting: DishSighting, events: [TasteEvent]) -> String {
+        let rated = events.filter {
+            $0.isRated && $0.dishName.caseInsensitiveCompare(sighting.name) == .orderedSame
+        }
+        let good = rated.filter { $0.rating == .good }.count
+
+        if rated.isEmpty {
+            return "Never rated here. Cheap to learn — one taste, low satiety cost."
+        }
+        if good > 0 {
+            return "Rated good \(good) of \(rated.count) time\(rated.count == 1 ? "" : "s")."
+        }
+        return "Rated \(rated.count) time\(rated.count == 1 ? "" : "s"), never good."
     }
 
     private static func orderForSatiety(_ sightings: [DishSighting]) -> [DishSighting] {

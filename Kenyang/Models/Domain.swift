@@ -203,5 +203,9 @@ struct CapacityState: Sendable {
 
     var plateEstimate: Double { remaining / 3.0 }
 
-    var isExhausted: Bool { fractionRemaining <= 0.12 }
+    /// Named so the stop screen can print it beside the reading. Showing both numbers
+    /// is what makes "computed, not chosen" checkable rather than claimed.
+    static let exhaustionThreshold = 0.12
+
+    var isExhausted: Bool { fractionRemaining <= Self.exhaustionThreshold }
 }

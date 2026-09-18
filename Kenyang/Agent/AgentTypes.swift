@@ -69,6 +69,24 @@ enum TraceKind: String, Sendable {
     case modelFailure
 }
 
+/// A guardrail rejecting the model's move, in the three parts the trace shows in
+/// reading order: what the model wrote, what it then chose, and what the guard did.
+///
+/// Held as structure rather than a sentence because the rejected move is rendered
+/// **struck through rather than hidden** — the diner can see the app disagreeing with
+/// its own model, and that is the whole point of the row.
+struct GuardOverride: Sendable, Equatable {
+    /// The model's own stated reason, quoted.
+    let wrote: String
+    /// The move it chose, which was rejected.
+    let chose: String
+    /// The move that was taken instead.
+    let forced: String
+    let guardName: String
+    let layer: Int
+    let did: String
+}
+
 struct TraceEntry: Identifiable, Sendable {
     let id = UUID()
     let at: Date
@@ -76,13 +94,23 @@ struct TraceEntry: Identifiable, Sendable {
     let title: String
     let detail: String
     let isDeterministic: Bool
+    /// Present only on the rows where a guard rejected the model. `exploit` is chosen
+    /// ~92% of the time, so these rows are where the branching the diner sees actually
+    /// comes from — which makes this the one entry worth a fill, a border and a
+    /// three-part layout.
+    let override: GuardOverride?
 
-    init(kind: TraceKind, title: String, detail: String, isDeterministic: Bool) {
+    init(kind: TraceKind,
+         title: String,
+         detail: String,
+         isDeterministic: Bool,
+         override: GuardOverride? = nil) {
         self.at = .now
         self.kind = kind
         self.title = title
         self.detail = detail
         self.isDeterministic = isDeterministic
+        self.override = override
     }
 }
 
@@ -93,8 +121,13 @@ final class TraceLog {
 
     func record(_ entry: TraceEntry) { entries.append(entry) }
 
-    func record(kind: TraceKind, title: String, detail: String, deterministic: Bool) {
-        entries.append(TraceEntry(kind: kind, title: title, detail: detail, isDeterministic: deterministic))
+    func record(kind: TraceKind,
+                title: String,
+                detail: String,
+                deterministic: Bool,
+                override: GuardOverride? = nil) {
+        entries.append(TraceEntry(kind: kind, title: title, detail: detail,
+                                  isDeterministic: deterministic, override: override))
     }
 
     func clear() { entries.removeAll() }

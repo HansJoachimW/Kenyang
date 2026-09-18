@@ -10,6 +10,9 @@ private struct Harness: Identifiable {
 
 struct VerificationView: View {
     @Environment(\.kenyangStore) private var store
+    /// The live session's trace, so a harness can put a guard override into the panel
+    /// the diner actually looks at.
+    var trace: TraceLog?
     @State private var runner: VerificationRunner?
     @State private var active: String?
     @State private var elapsed: [String: Duration] = [:]
@@ -149,6 +152,34 @@ struct VerificationView: View {
                         TierFixtures.clear(runner.store)
                         TierFixtures.seed(into: runner.store, visits: 6)
                         print("[SEED] Gyu-Kaku Kemang · 6 visits — expect Go Standard")
+                    },
+            Harness(id: "seed-override",
+                    name: "Seed a guard override",
+                    detail: "Screen 7B — the consistency guard rejecting the model, in the live trace",
+                    rendersInApp: false) {
+                        guard let trace else {
+                            print("[SEED] no live trace — open this from a session")
+                            return
+                        }
+                        trace.record(kind: .verdict, title: "Verdict: contradicted",
+                                     detail: "evaluateHypothesis(raw) = contradicted (observed 0.00 vs expected 1.00, n=3)",
+                                     deterministic: true)
+                        trace.record(
+                            kind: .guardrail,
+                            title: "Consistency guard overrode the model",
+                            detail: "Reason said the hypothesis was contradicted but the move was exploit — overridden",
+                            deterministic: true,
+                            override: GuardOverride(
+                                wrote: "The tools say the hypothesis is CONTRADICTED, and the budget estimate is unreliable.",
+                                chose: "exploit",
+                                forced: "pivot",
+                                guardName: "ConsistencyGuard",
+                                layer: 6,
+                                did: "The stated reason disagreed with the chosen move, so the move was rejected and the pivot forced."))
+                        trace.record(kind: .decision, title: "Pivot forced",
+                                     detail: "raw → meat, on the tool's authority",
+                                     deterministic: true)
+                        print("[SEED] guard override in the trace — open Trace to see it")
                     },
             Harness(id: "--branch-battery",
                     name: "Branch battery (TB)",

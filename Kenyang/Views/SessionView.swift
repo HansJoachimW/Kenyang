@@ -20,7 +20,6 @@ struct RootView: View {
 
 struct SessionView: View {
     @Bindable var model: SessionViewModel
-    @State private var showingTrace = false
     @State private var showingVerification = false
 
     var body: some View {
@@ -29,10 +28,10 @@ struct SessionView: View {
                 switch model.phase {
                 case .idle:              StartView(model: model)
                 case .planning:          PlanningView(model: model)
-                case .awaitingApproval:  PlanView(model: model)
+                case .awaitingApproval:  RoundPlanView(model: model)
                 case .eating:            EatingView(model: model)
-                case .stopped(let m):    TerminalView(title: "Stop here", message: m, model: model)
-                case .declined(let m):   TerminalView(title: "Nothing to optimise", message: m, model: model)
+                case .stopped:           StopView(model: model)
+                case .declined(let m):   DeclineView(model: model, message: m)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -40,17 +39,17 @@ struct SessionView: View {
             .navigationTitle("Kenyang")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Trace") { showingTrace = true }
+                    Button("Trace") { model.showTrace = true }
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Verify") { showingVerification = true }
                 }
             }
-            .sheet(isPresented: $showingTrace) {
+            .sheet(isPresented: $model.showTrace) {
                 TraceView(trace: model.trace)
             }
             .sheet(isPresented: $showingVerification) {
-                VerificationView()
+                VerificationView(trace: model.trace)
             }
         }
         // Blue Slate is the only fill the design allows, so no control may fall back to
@@ -328,25 +327,6 @@ struct TerminalView: View {
     }
 }
 
-struct TraceView: View {
-    let trace: TraceLog
-
-    var body: some View {
-        NavigationStack {
-            List(trace.entries) { entry in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(entry.title).font(.subheadline.bold())
-                        Spacer()
-                        AttributionBadge(isDeterministic: entry.isDeterministic)
-                    }
-                    Text(entry.detail).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Trace")
-        }
-    }
-}
 
 enum DemoSpread {
     static let tierNames = ["Standard", "Premium"]

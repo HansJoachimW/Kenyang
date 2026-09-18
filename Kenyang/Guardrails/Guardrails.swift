@@ -81,6 +81,14 @@ struct OutputValidator {
     static func sanitised(_ text: String, fallback: String) -> String {
         isSafe(text) ? text : fallback
     }
+
+    /// A claim has to say *where the value is*. The model sometimes returns a single
+    /// word — "Unknown" — which decodes perfectly, passes every structural guard, and
+    /// says nothing. Guided generation constrains shape, not meaning, so shape-valid
+    /// and useless is a state the app has to catch itself.
+    static func isSubstantive(_ text: String) -> Bool {
+        text.split(whereSeparator: \.isWhitespace).count >= 4
+    }
 }
 
 struct ConsistencyGuard {
@@ -116,6 +124,18 @@ struct StopGuard {
 
     static func shouldStop(capacity: CapacityState, minutesRemaining: Int?) -> Bool {
         reason(capacity: capacity, minutesRemaining: minutesRemaining) != .none
+    }
+
+    /// The longer form, for the stop screen. `message` is the one-liner Siri speaks and
+    /// doubles as the headline there, so reusing it as the body printed the same
+    /// sentence twice.
+    static func detail(for reason: StopReason) -> String {
+        switch reason {
+        case .capacityExhausted: "You have about a quarter plate left. Spend it on something you already know is good, then stop."
+        case .seatingTimeOver:   "Whatever is already on the grill is the end of the meal."
+        case .lastOrderPassed:   "Under fifteen minutes left. Anything ordered now is the last of it."
+        case .none:              "Nothing is wrong — you decided, and that is reason enough."
+        }
     }
 
     static func message(for reason: StopReason) -> String {
@@ -160,7 +180,18 @@ struct LoopBudget {
 
     var maxRounds: Int = 6
     var callBudget: Int = 6
-    var wallClockLimit: TimeInterval = 20
+
+    /// Generous on purpose. This exists to stop a runaway round, not to ration a normal
+    /// one — and while it was declared and never read, nobody found out which it was.
+    ///
+    /// The 20 s it was written with came from a round believed to take ~36 s, which was
+    /// the Simulator running ~3× slow. Enforcing it revealed the real cost: one decode
+    /// failure on `hypothesise` plus its retry spent the whole budget, so `setIntent`
+    /// was refused and the objective silently fell back to `balanced` — losing the one
+    /// step where the model chooses policy. A normal device round with one retry is
+    /// ~18 s, so the limit has to clear that with room, or the guardrail routinely eats
+    /// the thing it is guarding.
+    var wallClockLimit: TimeInterval = 45
     private(set) var roundsUsed = 0
     private(set) var callsThisRound = 0
     private var roundStartedAt: Date = .now
@@ -231,5 +262,59 @@ enum ModelAvailability {
             default:                           return .unsupported
             }
         }
+    }
+}
+
+/// Why a claim never reached the screen, and what the model actually wrote.
+///
+/// Three different authors, so three different treatments. A thin claim is the model
+/// having nothing to say; a hallucination is a guardrail firing; a false positive is a
+/// blunt filter being blunt. Collapsing them into one "unavailable" would hide which is
+/// which, and which is which is the whole finding.
+struct ClaimRejection: Sendable, Equatable {
+    enum Layer: String, Sendable {
+        case thin       = "CLAIM TOO THIN"
+        case grounding  = "GROUNDING GUARD · LAYER 4"
+        case stance     = "OUTPUT VALIDATOR · FAILED CLOSED"
+    }
+
+    let layer: Layer
+    /// Shown struck through. The diner can see the app disagreeing with its own model,
+    /// which is the point — hiding it would be the dishonest choice.
+    let wrote: String
+    let explanation: String
+}
+
+/// Layer 4. The model names a category that is not on tonight's menu, so nothing it
+/// said about that category can be used.
+///
+/// `@Generable` constrains `category` to the enum, but `claim` is free text and the
+/// model will happily write "the soup station" at a venue with no soup. Shape-valid and
+/// ungrounded is a state only the app can catch.
+struct GroundingGuard {
+    static func ungroundedCategory(in claim: String, candidates: [DishSighting]) -> MenuCategory? {
+        let present = Set(candidates.map(\.category))
+        let spoken = words(in: claim)
+        return MenuCategory.allCases.first { category in
+            guard category != .unknown, !present.contains(category) else { return false }
+            return !terms(for: category).isDisjoint(with: spoken)
+        }
+    }
+
+    /// Matching on the display label as one string — "soup & broth" — meant the guard
+    /// could never fire, because a model writes "the soup station", not the label
+    /// verbatim. It compares words instead, drawn from both the label and the raw value.
+    private static func terms(for category: MenuCategory) -> Set<String> {
+        var terms = words(in: category.label)
+        terms.insert(category.rawValue.lowercased())
+        terms.remove("and")
+        return terms
+    }
+
+    private static func words(in text: String) -> Set<String> {
+        Set(text.lowercased()
+            .split { !$0.isLetter }
+            .map(String.init)
+            .filter { $0.count >= 3 })
     }
 }

@@ -39,6 +39,7 @@ final class VerificationRunner {
         await entitiesResolve()
         excludedNeverPlanned()
         ingredientQuestionsResolve()
+        degenerateClaimsAreCaught()
         actionButtonLogsInPlanOrder()
         activityStateTracksTheMeal()
         planSpendsWhatItBudgets()
@@ -748,6 +749,57 @@ final class VerificationRunner {
         emit("⚠️ RENDERING is unbuilt — no Widget Extension target exists yet, so the bar")
         emit("   and the three Island presentations are unverified. This checks the state")
         emit("   they will render from, and nothing about how they look.")
+        emit("")
+    }
+
+    private func degenerateClaimsAreCaught() {
+        emit("──── the layout survives what the model returns ⭐ ────")
+        emit("Injection testing returned real claims like \"Grill\", \"Unknown\" and a")
+        emit("station absent from the data. Measured reality, not hypotheticals — and")
+        emit("three different authors need three different treatments.")
+
+        // A grill-only card, deliberately. The full demo spread carries all seven
+        // categories, so nothing can be ungrounded against it and the guard could never
+        // fire — which is worth knowing: at a venue that serves everything, layer 4 has
+        // nothing to catch.
+        let spread = [
+            DishSighting(name: "Gyu-Kaku Karubi", category: .meat, printedCategory: "STANDARD MEAT"),
+            DishSighting(name: "Beef Harami", category: .meat, printedCategory: "STANDARD MEAT"),
+            DishSighting(name: "Salmon Nigiri", category: .raw, printedCategory: "SUSHI")
+        ]
+        let present = Set(spread.map(\.category)).map(\.rawValue).sorted()
+        emit("candidate categories tonight: \(present.joined(separator: ", ")) — no soup on this card")
+
+        var checks: [(String, Bool)] = []
+
+        // A — one word. Decodes perfectly, passes every structural guard, says nothing.
+        let thin = !OutputValidator.isSubstantive("Grill.")
+        checks.append(("A · one-word claim is not a claim", thin))
+        let real = OutputValidator.isSubstantive("The value is concentrated at the raw bar.")
+        checks.append(("   a real sentence still passes", real))
+
+        // B — a station that is not on the menu. Shape-valid and ungrounded.
+        let ghost = GroundingGuard.ungroundedCategory(
+            in: "Value is concentrated at the soup station.", candidates: spread)
+        let caught = ghost == .soup
+        checks.append(("B · hallucinated station caught", caught))
+        emit("   ungrounded category → \(ghost?.rawValue ?? "none")")
+
+        let grounded = GroundingGuard.ungroundedCategory(
+            in: "Value is concentrated at the meat.", candidates: spread)
+        checks.append(("   a category that IS on the menu passes", grounded == nil))
+
+        // C — true, on-stance, and rejected anyway. The filter is blunt on purpose.
+        let banned = !OutputValidator.isSafe("The refills are unlimited, so skip them.")
+        checks.append(("C · banned substring fails closed", banned))
+
+        emit("")
+        for (label, ok) in checks { emit("\(ok ? "✅" : "❌") \(label)") }
+        emit("→ the headline slot holds the model's sentence when there is one and the")
+        emit("  computed decision when there is not. Nothing below it depends on the")
+        emit("  sentence existing.")
+        let failed = checks.filter { !$0.1 }.count
+        emit("the layout survives what the model returns: \(failed == 0 ? "PASS" : "FAIL — \(failed) of \(checks.count)")")
         emit("")
     }
 

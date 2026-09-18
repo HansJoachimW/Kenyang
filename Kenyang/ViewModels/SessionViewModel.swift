@@ -29,6 +29,45 @@ final class SessionViewModel {
     var roundIndex = 1
     var askBudget = AskBudget()
     var pathSignatures: [String] = []
+    /// Owned here rather than in the view, because the guard block on the round plan
+    /// links straight into the trace.
+    var showTrace = false
+    /// Which guard fired, so the stop screen can print the reading it fired on.
+    var stopReason: StopReason = .none
+    /// What the model wrote that never reached the screen, and which layer stopped it.
+    var claimRejection: ClaimRejection?
+
+    /// The guard that fired while planning this round, if one did. The plan screen shows
+    /// it by name: `exploit` is chosen ~92% of the time, so a pivot the diner sees was
+    /// almost certainly produced by a guardrail rather than by the model choosing well,
+    /// and concealing that would be the dishonest choice.
+    var lastGuardThisRound: TraceEntry? {
+        trace.entries.last { $0.kind == .guardrail && $0.title.contains("guard") }
+    }
+
+    /// Whether the agent changed its mind this round, for the header.
+    var didPivot: Bool {
+        trace.entries.contains { $0.kind == .decision && $0.title == "pivot" }
+    }
+
+    /// What Adjust means to a diner who did not like the plan: more of this round spent
+    /// finding out, and a bolder posture. Not a re-roll of the same objective.
+    func adjustRound() {
+        guard let visit else { return }
+        plan = RoundPlanner.plan(objective: PlannerObjective(reconShare: .most,
+                                                             learnAbout: [],
+                                                             avoidProfile: nil,
+                                                             posture: .aggressive,
+                                                             rationale: "Adjusted — more of this round spent finding out."),
+                                 candidates: visit.sightings,
+                                 events: visit.tasteEvents,
+                                 capacity: CapacityEngine.state(for: visit),
+                                 exclusions: store.exclusions())
+        trace.record(kind: .plan,
+                     title: "adjusted",
+                     detail: "The diner rejected the plan; re-planned at recon=most, posture=aggressive.",
+                     deterministic: true)
+    }
 
     init(store: KenyangStore, trace: TraceLog? = nil) {
         let log = trace ?? TraceLog()
@@ -154,11 +193,15 @@ final class SessionViewModel {
 
         switch outcome {
         case .declined(let message):
-            store.endVisit(visit, outcome: .declined)
+            // Not ended here either: "Plan anyway" and "Log as I go" both need a live
+            // visit, and a declined meal that still logs is the point of the screen.
             pathSignatures.append(trace.pathSignature)
             phase = .declined(message)
-        case .stopped(_, let message):
-            store.endVisit(visit, outcome: .stopped)
+        case .stopped(let reason, let message):
+            // Deliberately NOT ended here. `endedBecause` decides whether this meal is
+            // an observation of capacity or only a lower bound on it, and ending the
+            // visit before the diner has answered writes `.unknown` for ever.
+            stopReason = reason
             pathSignatures.append(trace.pathSignature)
             phase = .stopped(message)
         case .degraded(let plan, let message):
@@ -169,6 +212,7 @@ final class SessionViewModel {
             self.plan = plan
             self.hypothesis = hypothesis
             self.intent = intent
+            self.claimRejection = agent.claimRejection
             phase = .awaitingApproval
         }
     }
@@ -264,7 +308,48 @@ final class SessionViewModel {
         beginPlanning()
     }
 
+    /// The diner choosing to stop, rather than the guard firing. Same screen either
+    /// way — it still has to ask why before it can end anything.
     func endSession() {
+        guard visit != nil else { return }
+        stopReason = .none
+        phase = .stopped("You chose to stop.")
+    }
+
+    /// The decline was right and the diner still wants to eat. Logging keeps the
+    /// capacity model fed, so a declined meal is not a wasted one.
+    func logAsIGo() {
+        phase = .eating
+        syncActivity()
+    }
+
+    /// "Plan anyway". The override is data, not an error — a triage guard that fires and
+    /// is overridden is evidence about the guard's threshold.
+    func planAnyway() {
+        trace.record(kind: .guardrail,
+                     title: "decline overridden",
+                     detail: "Triage declined and the diner asked for a plan anyway. Recorded, not argued with.",
+                     deterministic: true)
+        beginPlanning()
+    }
+
+    /// "Keep going anyway". Not a button, not greyed out, not preceded by a
+    /// confirmation — the diner is in control and the app does not argue. It is
+    /// recorded, because a guard that fired and was overridden is evidence about the
+    /// guard.
+    func keepGoing() {
+        trace.record(kind: .guardrail,
+                     title: "stop overridden",
+                     detail: "The guard fired and the diner chose to continue. Recorded, not argued with.",
+                     deterministic: true)
+        phase = .eating
+        syncActivity()
+    }
+
+    /// The only place a meal actually ends. `reason` is the one question worth asking:
+    /// only a `fullness` ending measures capacity, and every other ending is a lower
+    /// bound the fit must not average in as though it were an observation.
+    func endMeal(reason: MealEnding) {
         guard let visit else { return }
         let capacity = CapacityEngine.state(for: visit)
         LiveActivityController.shared.end(
@@ -275,11 +360,26 @@ final class SessionViewModel {
                                          nextTarget: nil,
                                          message: "Meal ended.")
         )
-        store.endVisit(visit, outcome: .stopped)
+        store.endVisit(visit, outcome: .stopped, ending: reason)
         pathSignatures.append(trace.pathSignature)
         self.visit = nil
         self.plan = nil
         self.hypothesis = nil
         phase = .idle
+    }
+
+    /// What the meal cost so far, against the cover. Money is stated once, after the
+    /// fact — never during a round.
+    var orderedValue: Double {
+        guard let visit else { return 0 }
+        return BreakEven.recovered(events: visit.tasteEvents, sightings: visit.sightings)
+    }
+
+    /// A figure with nothing to compare it against is not information.
+    var orderedAgainstCover: String {
+        guard let visit else { return "—" }
+        let ordered = orderedValue.formatted(.number.precision(.fractionLength(0)))
+        let cover = visit.pricePerHead.formatted(.number.precision(.fractionLength(0)))
+        return "Rp \(ordered) of \(cover)"
     }
 }

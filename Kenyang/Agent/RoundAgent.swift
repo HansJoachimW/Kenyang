@@ -27,6 +27,11 @@ final class RoundAgent {
     /// Optional, because the harnesses run the agent with no screen attached.
     private let progress: AgentProgress?
 
+    /// Set when a claim was rejected before display. The round plan demotes its headline
+    /// to the computed decision and shows what was struck out — three treatments, one
+    /// per author.
+    private(set) var claimRejection: ClaimRejection?
+
     /// The budget is injectable so the battery can exhaust it without waiting six real
     /// rounds for the model. Same reason `MenuItemEntityQuery` takes a store: a check
     /// that can be written but never run is the failure `TESTS.md` exists to prevent.
@@ -38,6 +43,7 @@ final class RoundAgent {
 
     func run(_ input: AgentInput) async -> AgentOutcome {
         budget.beginRound()
+        claimRejection = nil
 
         if TriageGuard.shouldDecline(sightings: input.sightings) {
             trace.record(kind: .decline,
@@ -171,12 +177,20 @@ final class RoundAgent {
                 h = nextBest(after: dead, input: input)
             }
 
-            if !OutputValidator.isSafe(h.claim) {
+            // The headline slot holds the model's sentence when there is one and the
+            // computed decision when there is not. Nothing below it depends on the
+            // sentence existing.
+            if let rejection = reject(h.claim, input: input) {
+                claimRejection = rejection
                 trace.record(kind: .guardrail,
-                             title: "output validator",
-                             detail: "Claim rejected before display: volume framing detected",
+                             title: rejection.layer.rawValue.lowercased(),
+                             detail: "Rejected before display: \"\(rejection.wrote)\" — \(rejection.explanation)",
                              deterministic: true)
-                h.claim = "The value looks concentrated at the \(h.category.label.lowercased())."
+                let computed = fallbackHypothesis(input)
+                h.claim = computed.claim
+                if h.category == .unknown || rejection.layer == .grounding {
+                    h.category = computed.category
+                }
             }
 
             await recordInvocations()
@@ -225,17 +239,32 @@ final class RoundAgent {
 
             var move = decision.move
             if !ConsistencyGuard.agrees(reason: decision.because, move: move) {
+                let forced: RoundMove = verdict == .contradicted ? .pivot : .exploit
                 trace.record(kind: .guardrail,
-                             title: "consistency guard",
+                             title: "Consistency guard overrode the model",
                              detail: "Reason said \"\(decision.because)\" but move was \(move.rawValue) — overridden",
-                             deterministic: true)
-                move = verdict == .contradicted ? .pivot : .exploit
+                             deterministic: true,
+                             override: GuardOverride(
+                                wrote: decision.because,
+                                chose: move.rawValue,
+                                forced: forced.rawValue,
+                                guardName: "ConsistencyGuard",
+                                layer: 6,
+                                did: "The stated reason disagreed with the chosen move, so the move was rejected and \(forced.rawValue) forced."))
+                move = forced
             }
             if verdict == .contradicted && move == .exploit {
                 trace.record(kind: .guardrail,
-                             title: "verdict guard",
+                             title: "Verdict guard overrode the model",
                              detail: "Tool said contradicted; exploit rejected",
-                             deterministic: true)
+                             deterministic: true,
+                             override: GuardOverride(
+                                wrote: decision.because,
+                                chose: move.rawValue,
+                                forced: RoundMove.pivot.rawValue,
+                                guardName: "ConsistencyGuard",
+                                layer: 6,
+                                did: "evaluateHypothesis returned contradicted, which binds. Exploit was rejected and the pivot forced."))
                 move = .pivot
             }
 
@@ -364,6 +393,30 @@ final class RoundAgent {
         case .exceededContextWindowSize: return .overflow
         default: return .fatal
         }
+    }
+
+    /// Order matters: a claim that is too thin to read cannot be checked for grounding
+    /// or for stance, so thinness is asked first.
+    private func reject(_ claim: String, input: AgentInput) -> ClaimRejection? {
+        if !OutputValidator.isSubstantive(claim) {
+            return ClaimRejection(
+                layer: .thin,
+                wrote: claim,
+                explanation: "The claim is too thin to show as reasoning, so the round is presented on the arithmetic instead.")
+        }
+        if let ghost = GroundingGuard.ungroundedCategory(in: claim, candidates: input.sightings) {
+            return ClaimRejection(
+                layer: .grounding,
+                wrote: claim,
+                explanation: "There is no \(ghost.label.lowercased()) on tonight's menu. Claim discarded before display.")
+        }
+        if !OutputValidator.isSafe(claim) {
+            return ClaimRejection(
+                layer: .stance,
+                wrote: claim,
+                explanation: "The sentence contained a banned substring. The filter is blunt on purpose and it fails closed.")
+        }
+        return nil
     }
 
     private func deterministicVerdict(_ h: ValueHypothesis, events: [TasteEvent]) -> HypothesisVerdict {
