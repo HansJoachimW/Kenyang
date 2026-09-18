@@ -40,6 +40,7 @@ final class VerificationRunner {
         excludedNeverPlanned()
         ingredientQuestionsResolve()
         actionButtonLogsInPlanOrder()
+        activityStateTracksTheMeal()
         planSpendsWhatItBudgets()
         await budgetExhaustionIsVisible()
         await modelTierIsDeclared()
@@ -682,6 +683,71 @@ final class VerificationRunner {
         emit("⚠️ the HAPTIC is unverified — UIFeedbackGenerator needs a foreground scene,")
         emit("   and the Action Button runs this in the background. Dialog is the")
         emit("   guaranteed channel; the taps have never been felt on a device.")
+        emit("")
+    }
+
+    private func activityStateTracksTheMeal() {
+        emit("──── the Live Activity state tracks the meal ⭐ ────")
+        emit("The bar and all three Island presentations render from one ContentState.")
+        emit("The derivation is pure, so it is checkable without a device or a widget.")
+
+        var checks: [(String, Bool)] = []
+
+        // ① the stop guard reaches the Island by the same route as every other surface
+        let exhausted = CapacityState(maxSatiety: 9, spent: 8.5)
+        let stopPhase = LiveActivityController.phase(capacity: exhausted, minutesRemaining: 40,
+                                                     isDegraded: false, isEating: true)
+        checks.append(("exhausted capacity → stopGuard", stopPhase == .stopGuard))
+        emit("  capacity 94% spent, eating → \(stopPhase.rawValue)")
+
+        // ② stopGuard outranks degraded — the diner needs the stop, not the caveat
+        let both = LiveActivityController.phase(capacity: exhausted, minutesRemaining: 40,
+                                                isDegraded: true, isEating: true)
+        checks.append(("stopGuard outranks degraded", both == .stopGuard))
+        emit("  stop AND degraded together → \(both.rawValue)")
+
+        let healthy = CapacityState(maxSatiety: 9, spent: 2)
+        let degraded = LiveActivityController.phase(capacity: healthy, minutesRemaining: 60,
+                                                    isDegraded: true, isEating: true)
+        checks.append(("no model → degraded", degraded == .degraded))
+        let planning = LiveActivityController.phase(capacity: healthy, minutesRemaining: 60,
+                                                    isDegraded: false, isEating: false)
+        checks.append(("not yet accepted → planning", planning == .planning))
+        let active = LiveActivityController.phase(capacity: healthy, minutesRemaining: 60,
+                                                  isDegraded: false, isEating: true)
+        checks.append(("accepted → active", active == .active))
+        emit("  four states reachable: \(stopPhase.rawValue), \(degraded.rawValue), \(planning.rawValue), \(active.rawValue)")
+
+        // ③ the countdown appears only when it is actionable. Above the last-order
+        //    threshold a ticking clock is noise the diner can do nothing with.
+        let quiet = LiveActivityController.state(phase: .active, capacity: healthy,
+                                                 minutesRemaining: 44, roundIndex: 2,
+                                                 nextTarget: "Karubi", message: nil)
+        let urgent = LiveActivityController.state(phase: .active, capacity: healthy,
+                                                  minutesRemaining: 12, roundIndex: 2,
+                                                  nextTarget: "Karubi", message: nil)
+        checks.append(("44 min left → no countdown", quiet.minutesToLastOrder == nil))
+        checks.append(("12 min left → countdown shown", urgent.minutesToLastOrder == 12))
+        emit("  44 min → \(quiet.minutesText ?? "hidden")   ·   12 min → \(urgent.minutesText ?? "hidden")")
+
+        // ④ the ring is a fraction, which is the only thing minimal has room for
+        let ring = quiet.fractionRemaining
+        checks.append(("ring is a 0…1 fraction", ring > 0 && ring <= 1))
+        emit("  capacity ring: \(String(format: "%.2f", ring))  ·  \(quiet.platesText)")
+
+        // ⑤ ContentState must survive the process boundary it crosses on every update
+        let roundTrip = (try? JSONDecoder().decode(
+            RoundActivityAttributes.ContentState.self,
+            from: JSONEncoder().encode(urgent))) == urgent
+        checks.append(("ContentState round-trips through Codable", roundTrip))
+
+        emit("")
+        for (label, ok) in checks { emit("\(ok ? "✅" : "❌") \(label)") }
+        let failed = checks.filter { !$0.1 }.count
+        emit("the Live Activity state tracks the meal: \(failed == 0 ? "PASS" : "FAIL — \(failed) of \(checks.count)")")
+        emit("⚠️ RENDERING is unbuilt — no Widget Extension target exists yet, so the bar")
+        emit("   and the three Island presentations are unverified. This checks the state")
+        emit("   they will render from, and nothing about how they look.")
         emit("")
     }
 

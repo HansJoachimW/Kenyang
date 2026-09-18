@@ -135,6 +135,41 @@ final class SessionViewModel {
 
     func acceptPlan() {
         phase = .eating
+        syncActivity()
+    }
+
+    /// The Live Activity mirrors the meal; it never drives it. Every caller that
+    /// changes capacity, phase or the plan ends here, so the Island cannot drift out of
+    /// step with the app by having been forgotten at one call site.
+    func syncActivity() {
+        guard let visit else { return }
+        let capacity = CapacityEngine.state(for: visit)
+        let activityPhase = LiveActivityController.phase(
+            capacity: capacity,
+            minutesRemaining: visit.minutesRemaining,
+            isDegraded: degradedMessage != nil,
+            isEating: phase == .eating
+        )
+        let message: String? = {
+            if activityPhase == .stopGuard {
+                return StopGuard.message(for: StopGuard.reason(capacity: capacity,
+                                                               minutesRemaining: visit.minutesRemaining))
+            }
+            return degradedMessage
+        }()
+        let state = LiveActivityController.state(
+            phase: activityPhase,
+            capacity: capacity,
+            minutesRemaining: visit.minutesRemaining,
+            roundIndex: roundIndex,
+            nextTarget: plan.flatMap { store.nextUnloggedItem(in: $0, visit: visit)?.item.dishName },
+            message: message
+        )
+        if LiveActivityController.shared.isRunning {
+            LiveActivityController.shared.update(state)
+        } else {
+            LiveActivityController.shared.start(venue: visit.restaurant?.name ?? "Buffet", state: state)
+        }
     }
 
     func rate(_ item: PlannedItem, rating: Rating) {
@@ -154,6 +189,7 @@ final class SessionViewModel {
                      title: "rateDish",
                      detail: "\(item.dishName) → \(rating.rawValue)",
                      deterministic: true)
+        syncActivity()
     }
 
     func rate(dishNamed name: String, rating: Rating, portion: PortionBucket = .normal) {
@@ -179,6 +215,7 @@ final class SessionViewModel {
                      title: "fullness",
                      detail: "reported \(value)/5 — ask budget \(askBudget.remaining) left",
                      deterministic: true)
+        syncActivity()
     }
 
     func nextRound() async {
@@ -188,6 +225,15 @@ final class SessionViewModel {
 
     func endSession() {
         guard let visit else { return }
+        let capacity = CapacityEngine.state(for: visit)
+        LiveActivityController.shared.end(
+            LiveActivityController.state(phase: .stopGuard,
+                                         capacity: capacity,
+                                         minutesRemaining: visit.minutesRemaining,
+                                         roundIndex: roundIndex,
+                                         nextTarget: nil,
+                                         message: "Meal ended.")
+        )
         store.endVisit(visit, outcome: .stopped)
         pathSignatures.append(trace.pathSignature)
         self.visit = nil
