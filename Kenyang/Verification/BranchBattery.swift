@@ -49,9 +49,8 @@ enum BranchBattery {
         /// The same computation `RoundAgent.deterministicVerdict` performs, so the
         /// battery scores against what the app itself would conclude.
         var verdict: HypothesisVerdict {
-            let p = ValueEngine.categoryPosterior(category, events: events)
-            guard p.sampleCount >= ValueEngine.minimumSamples else { return .insufficient }
-            return p.mean >= expected.score - 0.25 ? .supported : .contradicted
+            ValueEngine.verdict(ValueEngine.categoryPosterior(category, events: events),
+                                expecting: expected)
         }
 
         /// `nil` where either branch is defensible. Those scenarios are measured and

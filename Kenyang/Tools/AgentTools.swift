@@ -115,12 +115,12 @@ struct EvaluateHypothesisTool: Tool {
         await ToolContext.shared.note(name)
         let events = await ToolContext.shared.events
         let p = ValueEngine.categoryPosterior(arguments.category, events: events)
-        guard p.sampleCount >= ValueEngine.minimumSamples else {
+        let verdict = ValueEngine.verdict(p, expecting: arguments.expectedRating)
+        guard verdict != .insufficient else {
             await ToolContext.shared.note(name, result: "insufficient")
             return "evaluateHypothesis(\(arguments.category.rawValue)) = insufficient (n=\(p.sampleCount))"
         }
         let expected = arguments.expectedRating.score
-        let verdict: HypothesisVerdict = p.mean >= expected - 0.25 ? .supported : .contradicted
         await ToolContext.shared.note(name, result: verdict.rawValue)
         return "evaluateHypothesis(\(arguments.category.rawValue)) = \(verdict.rawValue) (observed \(String(format: "%.2f", p.mean)) vs expected \(String(format: "%.2f", expected)), n=\(p.sampleCount))"
     }
@@ -128,7 +128,7 @@ struct EvaluateHypothesisTool: Tool {
 
 struct CheckCapacityModelTool: Tool {
     let name = "checkCapacityModel"
-    let description = "Falsifies the capacity ESTIMATE itself by comparing what the app predicted against the fullness the diner reported. Returns consistent, overestimating, underestimating, or insufficient. Call this when deciding whether the remaining budget can still be trusted — it answers a different question from getRemainingCapacity, which only reports the current number."
+    let description = "Falsifies the capacity ESTIMATE itself by comparing what the app predicted against the fullness the diner reported. Returns consistent, overestimating, underestimating, or insufficient. Call this when deciding whether the remaining capacity can still be trusted — it answers a different question from getRemainingCapacity, which only reports the current number."
 
     @Generable struct Arguments {}
 
@@ -138,7 +138,7 @@ struct CheckCapacityModelTool: Tool {
         let readings = await ToolContext.shared.fullnessReadings
         guard let latest = readings.sorted(by: { $0.at < $1.at }).last else {
             await ToolContext.shared.note(name, result: "insufficient")
-            return "checkCapacityModel = insufficient (no fullness reading this meal; the budget is an unverified estimate)"
+            return "checkCapacityModel = insufficient (no fullness reading this meal; the capacity estimate is unverified)"
         }
         let predicted = CapacityEngine.predictedFullness(
             CapacityState(maxSatiety: capacity.maxSatiety, spent: latest.cumulativeSatiety))

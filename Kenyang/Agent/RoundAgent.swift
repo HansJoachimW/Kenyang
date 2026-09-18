@@ -161,7 +161,7 @@ final class RoundAgent {
                 try await session.respond(
                     to: """
                         Round \(input.roundIndex). Use the tools to see the spread, the \
-                        constraints and how much budget is left, then say where the value \
+                        constraints and how much capacity is left, then say where the value \
                         is concentrated and what rating you expect from that category.\(exclusion)
                         """,
                     generating: ValueHypothesis.self,
@@ -228,7 +228,7 @@ final class RoundAgent {
                         Your hypothesis was: \(hypothesis.claim)
                         Call evaluateHypothesis for the \(hypothesis.category.rawValue), \
                         getRemainingCapacity, and checkCapacityModel to see whether the \
-                        remaining budget can still be trusted. Then decide.
+                        remaining capacity can still be trusted. Then decide.
                         """,
                     generating: RoundDecision.self,
                     options: AgentCapabilities.toolBound(250)
@@ -420,9 +420,8 @@ final class RoundAgent {
     }
 
     private func deterministicVerdict(_ h: ValueHypothesis, events: [TasteEvent]) -> HypothesisVerdict {
-        let p = ValueEngine.categoryPosterior(h.category, events: events)
-        guard p.sampleCount >= ValueEngine.minimumSamples else { return .insufficient }
-        return p.mean >= h.expectedRating.score - 0.25 ? .supported : .contradicted
+        ValueEngine.verdict(ValueEngine.categoryPosterior(h.category, events: events),
+                            expecting: h.expectedRating)
     }
 
     private func nextBest(after dead: MenuCategory, input: AgentInput) -> ValueHypothesis {

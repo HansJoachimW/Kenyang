@@ -59,6 +59,29 @@ struct ValueEngine {
                              uncertainty: 1.0 / Double(n + 1))
     }
 
+    /// The guard band around the expectation, in rating-score units.
+    static let verdictBand = 0.25
+
+    /// Whether the ratings so far bear the hypothesis out. **One rule, four call sites** —
+    /// `evaluateHypothesis` answers the model with it, `RoundAgent` checks the model's
+    /// move against it, and both batteries score against it. They have to agree: a
+    /// verdict guard firing on a disagreement it invented would read as the model
+    /// contradicting the tools.
+    ///
+    /// The test is one-sided and **which side depends on the claim**. *Expect good here*
+    /// is falsified by the category rating worse. *Expect skip here* is the opposite
+    /// claim — that the category is not worth the capacity — and it is falsified by the
+    /// category rating **better**. Testing both the same way put the `skip` threshold at
+    /// −0.25, below every rating on a 0…1 scale, so the one hypothesis shape that is pure
+    /// falsification came back `supported` whatever the diner said.
+    static func verdict(_ posterior: DishPosterior, expecting expected: Rating) -> HypothesisVerdict {
+        guard posterior.isTrustworthy else { return .insufficient }
+        if expected == .skip {
+            return posterior.mean <= expected.score + verdictBand ? .supported : .contradicted
+        }
+        return posterior.mean >= expected.score - verdictBand ? .supported : .contradicted
+    }
+
     static func estimatedValue(for sighting: DishSighting, events: [TasteEvent]) -> Double {
         let post = posterior(dishName: sighting.name, category: sighting.category, events: events)
         var value = post.mean

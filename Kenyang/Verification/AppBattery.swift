@@ -46,6 +46,7 @@ final class VerificationRunner {
         await budgetExhaustionIsVisible()
         await modelTierIsDeclared()
         refusesOneSample()
+        await skipHypothesisCanBeFalsified()
         objectiveDrivesPlan()
         await toolsAndRefusals()
         await hypothesisPivots()
@@ -924,6 +925,65 @@ final class VerificationRunner {
         emit("")
     }
 
+    private func skipHypothesisCanBeFalsified() async {
+        emit("──── a skip hypothesis can be falsified ⭐  ·  TESTS.md T80 ────")
+        emit("The verdict compared observed >= expected - 0.25 for every expectation.")
+        emit("Rating.skip scores 0, so the threshold was -0.25 — below the scale. A")
+        emit("hypothesis expecting skip came back `supported` whatever the diner rated,")
+        emit("and evaluateHypothesis calls itself the only authority on whether it holds.")
+
+        let good = [
+            TasteEvent(dishName: "Karubi", category: .meat, rating: .good, portion: .normal, roundIndex: 1),
+            TasteEvent(dishName: "Harami", category: .meat, rating: .good, portion: .normal, roundIndex: 1)
+        ]
+        let skipped = [
+            TasteEvent(dishName: "Karubi", category: .meat, rating: .skip, portion: .taste, roundIndex: 1),
+            TasteEvent(dishName: "Harami", category: .meat, rating: .skip, portion: .taste, roundIndex: 1)
+        ]
+
+        // Expecting skip is the claim that the category is NOT worth the capacity. Good
+        // ratings refute it; skip ratings bear it out. Both directions, or the fix is
+        // just the old defect pointing the other way.
+        let refuted = ValueEngine.verdict(ValueEngine.categoryPosterior(.meat, events: good),
+                                          expecting: .skip)
+        let borneOut = ValueEngine.verdict(ValueEngine.categoryPosterior(.meat, events: skipped),
+                                           expecting: .skip)
+        emit("expected skip, rated good×2 → \(refuted.rawValue)")
+        emit("expected skip, rated skip×2 → \(borneOut.rawValue)")
+        emit("\(refuted == .contradicted ? "✅" : "❌") a skip hypothesis can be contradicted")
+        emit("\(borneOut == .supported ? "✅" : "❌") a skip hypothesis can still be supported")
+
+        // The band is one-sided and only `skip` changed sides. If these move, the branch
+        // battery's ground truth moved with them and its discrimination figure is void.
+        let goodUnchanged = ValueEngine.verdict(ValueEngine.categoryPosterior(.meat, events: skipped),
+                                                expecting: .good) == .contradicted
+            && ValueEngine.verdict(ValueEngine.categoryPosterior(.meat, events: good),
+                                   expecting: .good) == .supported
+        let fineUnchanged = ValueEngine.verdict(ValueEngine.categoryPosterior(.meat, events: skipped),
+                                                expecting: .fine) == .contradicted
+            && ValueEngine.verdict(ValueEngine.categoryPosterior(.meat, events: good),
+                                   expecting: .fine) == .supported
+        emit("\(goodUnchanged ? "✅" : "❌") expected good unchanged in both directions")
+        emit("\(fineUnchanged ? "✅" : "❌") expected fine unchanged in both directions")
+
+        // The tool answers the model and `deterministicVerdict` checks the model's move
+        // against it. Four copies of this rule drifting apart would make the verdict
+        // guard fire on a disagreement it invented itself.
+        await ToolContext.shared.load(sightings: [], events: good, capacity: CapacityState(maxSatiety: 9, spent: 1),
+                                      minutesRemaining: 45, exclusions: [], basisRecords: [],
+                                      fullnessReadings: [], hypothesisCategory: .meat)
+        let answered = (try? await EvaluateHypothesisTool().call(
+            arguments: .init(category: .meat, expectedRating: .skip))) ?? ""
+        let agrees = answered.contains(HypothesisVerdict.contradicted.rawValue)
+        emit("  evaluateHypothesis → \(answered)")
+        emit("\(agrees ? "✅" : "❌") the tool and the deterministic verdict agree")
+
+        let pass = refuted == .contradicted && borneOut == .supported
+            && goodUnchanged && fineUnchanged && agrees
+        emit("a skip hypothesis can be falsified: \(pass ? "PASS" : "FAIL")")
+        emit("")
+    }
+
     private func objectiveDrivesPlan() {
         emit("──── the objective changes the plan  ·  TESTS.md T37 ────")
         emit("Principle 29: replace the objective with a constant. If the plan is")
@@ -1021,9 +1081,7 @@ final class VerificationRunner {
                                          confidence: .high, expectedRating: .good)
 
         let posterior = ValueEngine.categoryPosterior(.raw, events: badRawBar)
-        let verdict: HypothesisVerdict = posterior.sampleCount < ValueEngine.minimumSamples
-            ? .insufficient
-            : (posterior.mean >= hypothesis.expectedRating.score - 0.25 ? .supported : .contradicted)
+        let verdict = ValueEngine.verdict(posterior, expecting: hypothesis.expectedRating)
 
         emit("rated the hypothesised category skip×3 → observed \(String(format: "%.2f", posterior.mean)), expected \(String(format: "%.2f", hypothesis.expectedRating.score))")
         emit("\(verdict == .contradicted ? "✅" : "❌") deterministic verdict: \(verdict.rawValue)")
