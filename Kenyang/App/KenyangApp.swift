@@ -20,6 +20,10 @@ struct KenyangApp: App {
                 Self.handle(command, store: store)
             }
         }
+
+        // Also `init`, and for a stricter reason: `BGTaskScheduler` throws if an
+        // identifier is registered after the app has finished launching.
+        ProactiveTrigger.registerBackgroundTask()
     }
 
     @MainActor

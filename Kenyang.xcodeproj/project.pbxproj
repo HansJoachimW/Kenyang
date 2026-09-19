@@ -451,6 +451,10 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Kenyang.entitlements;
 				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_FILE = "Kenyang-Info.plist";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Kenyang checks for a booking at a buffet you have eaten at, so it can weigh in on the tier before you order.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Kenyang notices when you arrive at a buffet you have eaten at, so it can weigh in on the tier before you order. It stays quiet unless it has something earned to say.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Kenyang records where a buffet is the first time you eat there, so it can recognise your arrival next time.";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = NDGX4SV6M6;
 				ENABLE_PREVIEWS = YES;
@@ -485,6 +489,10 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Kenyang.entitlements;
 				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_FILE = "Kenyang-Info.plist";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Kenyang checks for a booking at a buffet you have eaten at, so it can weigh in on the tier before you order.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Kenyang notices when you arrive at a buffet you have eaten at, so it can weigh in on the tier before you order. It stays quiet unless it has something earned to say.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Kenyang records where a buffet is the first time you eat there, so it can recognise your arrival next time.";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = NDGX4SV6M6;
 				ENABLE_PREVIEWS = YES;

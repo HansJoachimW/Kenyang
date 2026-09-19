@@ -63,6 +63,7 @@ struct StartView: View {
     let model: SessionViewModel
     @State private var showingCapture = false
     @State private var tierVenue: Restaurant?
+    @State private var proactiveOn = false
     @AppStorage("onboarding.plates") private var plates: Double = SessionDefaults.plates
 
     /// Screen 2 belongs to ARRIVAL, before a session exists. It only has something to
@@ -98,8 +99,22 @@ struct StartView: View {
                     .font(.footnote)
                     .tint(Palette.accent)
             }
+
+            // The same argument, unbidden. Offered once and only where it could fire —
+            // a venue with a ladder is the only place there is a tier decision to make.
+            if !laddered.isEmpty && !proactiveOn {
+                Button("Tell me before I order next time") {
+                    Task {
+                        await ProactiveTrigger.shared.enable(store: store)
+                        proactiveOn = ProactiveTrigger.shared.isEnabled
+                    }
+                }
+                .font(.footnote)
+                .tint(Palette.accent)
+            }
         }
         .padding()
+        .onAppear { proactiveOn = ProactiveTrigger.shared.isEnabled }
         .sheet(item: $tierVenue) { venue in
             TierRecommendationView(restaurant: venue) { rank in
                 tierVenue = nil

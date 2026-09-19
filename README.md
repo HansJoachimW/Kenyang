@@ -327,10 +327,35 @@ An incidental finding worth keeping: three failures began `DecisionB{"because": 
 
 Session start · menu capture from a published file, confirmed before anything is written ·
 tool-calling agent · hypothesis with a pre-registered expectation · round objective ·
-beam-search planning · rating · capacity accounting · **eight discoverable App Intents**,
-four `IndexedEntity` types indexed into Spotlight, an interactive snippet that rewrites
-itself in place, an Action Button intent, and a Live Activity with all three Dynamic
-Island presentations.
+beam-search planning · rating · capacity accounting that **learns from the diner's own
+fullness report** · **eight discoverable App Intents**, four `IndexedEntity` types indexed
+into Spotlight, an interactive snippet that rewrites itself in place, an Action Button
+intent, a Live Activity with all three Dynamic Island presentations, a Control Center
+control, a Dining focus filter, and an arrival trigger that usually says nothing.
+
+### The trigger that usually says nothing
+
+The highest-value moment in the app is not at the table. It is **before you pay** — a tier
+suggestion delivered after you have ordered is worthless. So arrival at a venue you have
+eaten at, or a booking on your calendar this morning, runs the tier argument unbidden:
+
+```
+region crossing  ·  morning calendar scan
+        ↓
+TierEngine.verdict — is there anything earned to say?
+        ↓
+ ├─ one menu, no ladder      → SILENCE
+ ├─ fewer than three visits  → SILENCE
+ ├─ the tier you already buy → SILENCE
+ └─ a rung you are not eating → one line, before you order
+```
+
+**Three of the four branches produce nothing, and that is the feature.** An agent that
+notifies on every trigger is a scheduler; one that runs, concludes it has nothing earned
+to say, and stays quiet has made a decision. Each silence records *which* one it was —
+a silence nobody can account for is indistinguishable from a trigger that failed.
+
+The line itself is a template, not model-phrased, and that is deliberate — see defect 7.
 
 **The design record is built.** Nine screens, against `Designs/C3 Design V1.2.pdf`:
 
@@ -349,7 +374,7 @@ Island presentations.
 ### Built but never exercised on device
 
 This is the distinction that matters, and it is the one an examiner probes. Everything
-above is measured **in the app battery**, 22 checks, and **every screenshot in this
+above is measured **in the app battery**, 24 checks, and **every screenshot in this
 repository is from the Simulator.** None of the following has been run by voice, by
 search, or with the app closed:
 
@@ -371,6 +396,9 @@ search, or with the app closed:
   battery, but the tile has never been added to Control Center or a Lock Screen
 * **The Dining focus filter.** The venue it pins is read by every session started from a
   system surface; the Focus row in Settings has never been opened
+* **The arrival and morning-of triggers.** The decision they gate is asserted four ways
+  in the battery and **three of the four produce nothing**. What has never happened is a
+  real region crossing, a real calendar scan, or a notification landing on a lock screen
 
 ### The Simulator is faster than the design assumed, and that matters
 
@@ -390,8 +418,9 @@ typical case.
    **5–13% effective** across three device runs, and the residual degrades to the tool
    verdict rather than vanishing. On iOS 27 the failed turn is now reverted rather than
    left in the transcript, which makes the retry cheaper but does not make it rarer.
-3. **`CapacityEngine.fittedMax` fits on censored data** — see below. `Visit.endedBecause`
-   now records *why* a meal ended, so the input exists; the fit does not read it yet.
+3. ~~**`CapacityEngine.fittedMax` fits on censored data**~~ → **CLOSED 2026-09-19.** See
+   below. The fit reads `endedBecause` now, and layer 1 turned out to be dead code
+   besides.
 4. **`hypothesise` is close to its ceilings** — 2,023 of 2,200 tokens and 33 of 36
    transcript entries, 92% of both, at ~7 s on device. This is why the round does *not*
    thread a transcript between steps, although 26.5 would allow it: the tightest call
@@ -404,8 +433,13 @@ typical case.
    and unseen.** The `KenyangWidgets` target exists, the state derivation passes 9/9
    checks and the App Group now resolves; **none of the six surfaces has been rendered on
    hardware.** Building B9 made this list longer, not shorter.
-7. ~~No Control Center control, Focus filter or background task.~~ → the first two landed
-   with B9 on 2026-09-19. **No background task** — that is B8, still unbuilt.
+7. ~~No Control Center control, Focus filter or background task.~~ → **all three landed
+   2026-09-19** (B9, then B8). What remains is that the tier notification's line is a
+   template rather than model-phrased, because T58 — does `SystemLanguageModel` answer
+   inside a `BGTask`? — has not been measured. That is a deliberate fallback, not an
+   omission: a notification that failed to fire because an unmeasured background model
+   call hung would be worse than one that reads plainly, and the trigger gets one shot at
+   the moment that matters.
 8. Grill constraints — slots, cook time, plain-before-marinated — are designed, not
    implemented in `RoundPlanner`.
 9. **`KenyangStore` is not `@Observable`.** Screens that read it directly — the tier
@@ -486,11 +520,24 @@ test.** The battery was green through every one of them.
   the word in code, where it only ever meant one thing. ⚠️ Whether this moves the decode
   rate is **unmeasured** and needs a device run.
 
-### The capacity model has a defect that would not announce itself
+### The capacity model could detect that it was wrong and could not learn from it
 
-`CapacityEngine.fittedMax(from:)` averages the cumulative satiety of completed visits. **Those totals are lower bounds, not observations** — a meal that ended because the seating expired says only `S_max ≥ that total`. Averaging censored with uncensored data biases `S_max` **downward, and worse the more the app is used**, while every screen keeps looking correct.
+`CapacityEngine.fittedMax(from:)` averaged the cumulative satiety of completed visits. **Those totals are lower bounds, not observations** — a meal that ended because the seating expired says only `S_max ≥ that total`. Averaging censored with uncensored data biased `S_max` **downward, and worse the more the app was used**, while every screen kept looking correct.
 
-`checkCapacityModel` already returns `consistent · over · under · insufficient` from this comparison. **The tool fires; the update rule behind it does not exist.** The app can detect that its capacity model is wrong and cannot yet learn from it.
+**Closed 2026-09-19, and the censoring was the smaller half of it.** Layer 1 of the ladder — the within-meal correction — was **dead code**: `correctedMax` was defined, documented, listed in the design as *"flat ±20% off the latest reading"*, and **called by nothing**. `state(for:)` handed the planner the raw declared prior every round. So the fit was biased *and* unplugged.
+
+| Layer | What it does now |
+|---|---|
+| 0 · prior | What you said a full meal is, on the first screen |
+| 1 · within-meal | Every fullness reading implies a ceiling — *"four of five at 3.0 satiety"* puts `S_max` near 3.75. The estimate moves **half the distance to their mean, clamped at ±20% per meal**, and the planner reads the result |
+| 2 · across-meal | Fits on `fullness`-terminated meals only. A meal that ran out of clock is a lower bound: **it can raise the estimate and can never lower it** |
+| 3 · per-category density | Built, gated at n ≥ 8, **shipped silenced** — `satietyCost` still reads the §6b.1 prior |
+
+The falsification path is deliberately kept off the correction: `verdict` tests the **declared** prior, never the corrected figure. Testing the correction against the reading that produced it would make `checkCapacityModel` answer `consistent` whatever the diner said — the capacity model agreeing with itself by construction.
+
+**Layer 3 stays silent for a stated reason.** The §6b.1 density table has never been checked against real eating, and T64 — does `predictedFullness` track what a diner actually reports? — needs a real meal. The ordinal fallback (T65) was built *first*, so the branch that throws layer 3 away is proven runnable before layer 3 can mislead anyone.
+
+`checkCapacityModel` returned `consistent · over · under · insufficient` throughout. **The tool fired; the update rule behind it did not exist.** Now the diner's fullness report is a falsification the diner authored.
 
 ### Agency level — the battery has now run, and it splits the claim in two
 

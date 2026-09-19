@@ -42,6 +42,8 @@ final class VerificationRunner {
         degenerateClaimsAreCaught()
         actionButtonLogsInPlanOrder()
         activityStateTracksTheMeal()
+        capacityModelLearns()
+        await proactiveStaysQuiet()
         minorSurfacesAreWired()
         planSpendsWhatItBudgets()
         await budgetExhaustionIsVisible()
@@ -923,6 +925,250 @@ final class VerificationRunner {
         emit("\(StatisticalGuard.canClaim(p1) ? "❌" : "✅") n=1 → claim refused")
         emit("\(StatisticalGuard.canClaim(p2) ? "✅" : "❌") n=2 → claim allowed")
         emit("no claim from one rating: \(!StatisticalGuard.canClaim(p1) && StatisticalGuard.canClaim(p2) ? "PASS" : "FAIL")")
+        emit("")
+    }
+
+    private func proactiveStaysQuiet() async {
+        emit("──── the proactive trigger stays quiet ⭐  ·  TESTS.md T38 · T58 ────")
+        emit("An agent that notifies on every trigger is a scheduler. One that runs,")
+        emit("concludes it has nothing EARNED to say, and says nothing, has made a")
+        emit("decision — and that is the same mechanism demonstrating both property 6")
+        emit("(proactive) and property 7 (self-limiting).")
+
+        let scratch = KenyangStore(container: KenyangStore.makeContainer(inMemory: true))
+        var checks: [(String, Bool)] = []
+
+        func venue(_ name: String, tiers: [String], prices: [Double]) -> Restaurant {
+            let r = scratch.findOrCreate(named: name, pricePerHead: prices.first ?? 0)
+            r.tierNames = tiers
+            r.tierPrices = prices
+            return r
+        }
+
+        /// A meal on the premium card — both rungs are on the menu, so the habitual rank
+        /// is 1 — where exactly one dish is rated `good`. Which rung *that* dish sits on
+        /// is the whole argument.
+        func meal(at venue: Restaurant, rateGood dish: String) {
+            let v = scratch.startVisit(restaurantName: venue.name,
+                                       pricePerHead: venue.tierPrice(rank: 1) ?? 0,
+                                       seatingLimitMinutes: SessionDefaults.seatingMinutes,
+                                       maxSatiety: SessionDefaults.maxSatiety)
+            scratch.addSightings([("Karubi", .meat, venue.tierName(rank: 0), 0),
+                                  ("Wagyu", .meat, venue.tierName(rank: 1), 1)], to: v)
+            scratch.rate(dishName: dish, category: .meat, rating: .good,
+                         portion: .normal, in: v, roundIndex: 1)
+            scratch.endVisit(v, outcome: .stopped, ending: .fullness)
+        }
+
+        // ① one menu — there is no tier decision to make
+        let flat = venue("One Menu", tiers: ["Standard"], prices: [200_000])
+        let noLadder = ProactiveDecision.decide(for: flat) == .silent(.noLadder)
+        checks.append(("one menu is silent", noLadder))
+        emit("")
+        emit("  \(noLadder ? "✅" : "❌") a venue with one menu → silent (\(ProactiveDecision.Silence.noLadder.explanation))")
+
+        // ② a ladder, but nothing earned to argue from yet
+        let fresh = venue("Too New", tiers: ["Standard", "Premium"], prices: [250_000, 400_000])
+        meal(at: fresh, rateGood: "Karubi")
+        let tooFew = ProactiveDecision.decide(for: fresh) == .silent(.tooFewVisits)
+        checks.append(("too little history is silent", tooFew))
+        emit("  \(tooFew ? "✅" : "❌") 1 visit of \(TierEngine.minimumVisits) → silent (\(ProactiveDecision.Silence.tooFewVisits.explanation))")
+
+        // ③ enough history, and the answer is the tier you already buy
+        let settled = venue("Settled", tiers: ["Standard", "Premium"], prices: [250_000, 400_000])
+        for _ in 0..<3 { meal(at: settled, rateGood: "Wagyu") }
+        let unchanged = ProactiveDecision.decide(for: settled) == .silent(.unchanged)
+        checks.append(("an unchanged answer is silent", unchanged))
+        emit("  \(unchanged ? "✅" : "❌") premium bought, the premium cut is what they rate good → silent (\(ProactiveDecision.Silence.unchanged.explanation))")
+
+        // ④ the one case worth interrupting for: they buy the premium card and the dish
+        // they actually finish is on the standard rung.
+        let wasteful = venue("Gyu-Kaku", tiers: ["Standard", "Premium"], prices: [250_000, 400_000])
+        for _ in 0..<3 { meal(at: wasteful, rateGood: "Karubi") }
+        let decision = ProactiveDecision.decide(for: wasteful)
+        var speaks = false
+        if case .notify(let title, let body) = decision {
+            speaks = true
+            emit("  ✅ premium bought, the standard cut is what they finish → NOTIFY")
+            emit("     \"\(title)\"")
+            emit("     \"\(body)\"")
+        } else {
+            emit("  ❌ premium bought, standard earned → \(decision)")
+        }
+        checks.append(("a tier worth changing speaks", speaks))
+
+        let silentCount = [noLadder, tooFew, unchanged].filter { $0 }.count
+        emit("")
+        emit("  \(silentCount) of 4 triggers produced nothing. That ratio is the claim:")
+        emit("  restraint is the behaviour, not a trigger that failed to fire.")
+
+        // T58 — the decision is deterministic precisely BECAUSE this is unmeasured.
+        emit("")
+        let availability = SystemLanguageModel.default.availability
+        emit("  T58 — background model availability: \(availability == .available ? "available (foreground)" : "\(availability)")")
+        emit("  ⚠️ This reads the FOREGROUND process. Whether SystemLanguageModel answers")
+        emit("     inside a BGTask is still unmeasured, and needs a real background launch")
+        emit("     on a device. So the tier line is rules + template — T58's own stated")
+        emit("     fallback — and the model phrases nothing on this path yet.")
+
+        let failures = checks.filter { !$0.1 }.count
+        emit("the proactive trigger stays quiet: \(failures == 0 ? "PASS" : "FAIL — \(failures) of \(checks.count) checks")")
+        emit("→ the region crossing and the notification landing are device checks; T38")
+        emit("  closes on a phone that has actually arrived somewhere")
+        emit("")
+    }
+
+    private func capacityModelLearns() {
+        emit("──── the capacity model learns ⭐  ·  TESTS.md T61 · T62 · T63 · T65 ────")
+        emit("checkCapacityModel could already detect that the capacity model was wrong.")
+        emit("Nothing updated from it: layer 1 was dead code, and layer 2 averaged meals")
+        emit("that ended on the clock as though the diner had stopped because they were")
+        emit("full. That biases S_max downward, worse the more the app is used, while")
+        emit("every screen keeps looking correct.")
+
+        let scratch = KenyangStore(container: KenyangStore.makeContainer(inMemory: true))
+        var checks: [(String, Bool)] = []
+
+        // `.dessert` at a normal portion costs exactly 1.0 satiety, so a total is a
+        // count. Events are backdated so every reading sees them as already eaten.
+        func eat(_ count: Int, _ category: MenuCategory, in v: Visit, named: String) {
+            for i in 0..<count {
+                let e = scratch.rate(dishName: "\(named)-\(i)", category: category,
+                                     rating: .good, portion: .normal, in: v, roundIndex: 1)
+                e.at = .now.addingTimeInterval(-3600)
+            }
+        }
+
+        func visit(_ name: String, satiety: Int, ending: MealEnding) -> Visit {
+            let v = scratch.startVisit(restaurantName: name,
+                                       pricePerHead: SessionDefaults.pricePerHead,
+                                       seatingLimitMinutes: SessionDefaults.seatingMinutes,
+                                       maxSatiety: SessionDefaults.maxSatiety)
+            eat(satiety, .dessert, in: v, named: name)
+            scratch.endVisit(v, outcome: .stopped, ending: ending)
+            return v
+        }
+
+        // ── Layer 1 · T61 — the within-meal correction
+        emit("")
+        emit("① layer 1 — one reading, a clamped residual, not a flat ±20% step")
+        let live = scratch.startVisit(restaurantName: "Live",
+                                      pricePerHead: SessionDefaults.pricePerHead,
+                                      seatingLimitMinutes: SessionDefaults.seatingMinutes,
+                                      maxSatiety: 9)
+        let untouched = CapacityEngine.correctedMax(for: live)
+        let quiet = untouched == 9
+        checks.append(("no reading leaves the prior alone", quiet))
+        emit("  \(quiet ? "✅" : "❌") no reading → \(String(format: "%.2f", untouched)), the declared prior")
+
+        eat(3, .dessert, in: live, named: "Live")
+        scratch.recordFullness(4, in: live)
+        let early = live.fullnessReadings[0]
+        let corrected = CapacityEngine.correctedMax(for: live)
+        // 3.0 satiety at "four of five" implies a ceiling near 3.75 against a declared 9.
+        // Half that residual is −2.6, which the clamp holds to −1.8.
+        let moved = corrected < 9
+        let clamped = corrected >= 9 * (1 - CapacityEngine.correctionClamp) - 0.001
+        checks.append(("a reading moves the estimate", moved))
+        checks.append(("the move is clamped", clamped))
+        emit("  fullness 4 of 5 at 3.0 satiety → implies \(String(format: "%.2f", CapacityEngine.impliedMax(for: early) ?? 0))")
+        emit("  \(moved ? "✅" : "❌") the estimate moved: 9.00 → \(String(format: "%.2f", corrected))")
+        emit("  \(clamped ? "✅" : "❌") and no further than the ±\(Int(CapacityEngine.correctionClamp * 100))% clamp allows")
+
+        // The verdict must test the prior, or the correction validates itself.
+        let stillCaught = CapacityEngine.verdict(for: live) != .consistent
+        checks.append(("the verdict still tests the prior", stillCaught))
+        emit("  \(stillCaught ? "✅" : "❌") checkCapacityModel still says \(CapacityEngine.verdict(for: live).rawValue) — it tests the prior, not the correction")
+
+        // ── Layer 2 · T62 — censored meals
+        emit("")
+        emit("② layer 2 — three fullness meals, two that ran out of clock")
+        let full = [visit("F1", satiety: 8, ending: .fullness),
+                    visit("F2", satiety: 9, ending: .fullness),
+                    visit("F3", satiety: 10, ending: .fullness)]
+        let short = [visit("C1", satiety: 3, ending: .clock),
+                     visit("C2", satiety: 4, ending: .clock)]
+
+
+        let fitted = CapacityEngine.fittedMax(from: full + short, fallback: 9)
+        let naive = (8.0 + 9 + 10 + 3 + 4) / 5
+        let ignoresCensored = abs(fitted - 9.0) < 0.01
+        checks.append(("censored meals do not drag the fit down", ignoresCensored))
+        emit("  totals — fullness 8, 9, 10 · clock 3, 4")
+        emit("  \(ignoresCensored ? "✅" : "❌") S_max = \(String(format: "%.2f", fitted)), the fullness mean — not \(String(format: "%.2f", naive)), the average of everything")
+
+        // A lower bound is still evidence in one direction.
+        let big = visit("C3", satiety: 12, ending: .clock)
+        let raised = CapacityEngine.fittedMax(from: full + short + [big], fallback: 9)
+        let liftsNotLowers = abs(raised - 12.0) < 0.01
+        checks.append(("a censored meal can still raise the estimate", liftsNotLowers))
+        emit("  \(liftsNotLowers ? "✅" : "❌") a clock meal of 12 raises it to \(String(format: "%.2f", raised)) — you ate that much and left with room")
+
+        let onlyShort = CapacityEngine.fittedMax(from: short, fallback: 9)
+        let holdsPrior = abs(onlyShort - 9.0) < 0.01
+        checks.append(("too few fullness meals holds the prior", holdsPrior))
+        emit("  \(holdsPrior ? "✅" : "❌") clock meals alone → \(String(format: "%.2f", onlyShort)), the prior held rather than a fit invented")
+
+        // ── Layer 3 · T63 — density, gated and silenced
+        emit("")
+        emit("③ layer 3 — per-category density, shipped silenced (Principle 30)")
+        let dense = scratch.startVisit(restaurantName: "Dense",
+                                       pricePerHead: SessionDefaults.pricePerHead,
+                                       seatingLimitMinutes: SessionDefaults.seatingMinutes,
+                                       maxSatiety: 9)
+        eat(4, .meat, in: dense, named: "Karubi")
+
+        var fittedAt: [Int: Double?] = [:]
+        for n in 1...CapacityEngine.minimumDensitySamples {
+            scratch.recordFullness(4, in: dense)
+            if n >= CapacityEngine.minimumDensitySamples - 1 {
+                fittedAt[n] = CapacityEngine.fittedDensity(for: .meat, from: [dense])
+            }
+        }
+        let belowGate = (fittedAt[7] ?? nil) == nil
+        let atGate = (fittedAt[8] ?? nil) != nil
+        checks.append(("density refuses below n = 8", belowGate))
+        checks.append(("density fits at n = 8", atGate))
+        emit("  \(belowGate ? "✅" : "❌") n = 7 → insufficient, no coefficient")
+        emit("  \(atGate ? "✅" : "❌") n = 8 → \(String(format: "%.2f", (fittedAt[8] ?? nil) ?? 0)) against a prior of \(String(format: "%.2f", MenuCategory.meat.satietyDensity))")
+
+        // Silenced means silenced: the cost the planner uses must not have moved.
+        let sighting = DishSighting(name: "Karubi", category: .meat)
+        let cost = ValueEngine.satietyCost(for: sighting, portion: .normal)
+        let silenced = abs(cost - MenuCategory.meat.satietyDensity) < 0.001
+        checks.append(("the fitted density is not wired in", silenced))
+        emit("  \(silenced ? "✅" : "❌") satietyCost still reads the §6b.1 prior — the mechanism ships, the behaviour does not")
+        emit("  → T64 decides whether the continuous curve deserves this refinement, and")
+        emit("    it needs a real meal. Until then the coefficient is computed and unread")
+
+        // ── T65 — the ordinal fallback
+        emit("")
+        emit("④ the ordinal fallback — a full round on five coarse states")
+        let spread = DemoSpread.standard.map {
+            DishSighting(name: $0.name, category: $0.category,
+                         printedCategory: $0.printed, tierRank: $0.tier)
+        }
+        let halfEaten = CapacityState(maxSatiety: 9, spent: 7.0)
+        let ordinalBudget = CapacityEngine.ordinalRemaining(halfEaten)
+        let ordinalPlan = RoundPlanner.plan(objective: .balanced, candidates: spread,
+                                            events: [], capacity: halfEaten,
+                                            exclusions: [], scale: .ordinal)
+        let continuousPlan = RoundPlanner.plan(objective: .balanced, candidates: spread,
+                                               events: [], capacity: halfEaten,
+                                               exclusions: [])
+        let runs = !ordinalPlan.isEmpty
+        let coarse = ordinalBudget != halfEaten.remaining
+        checks.append(("a round plans under the ordinal budget", runs))
+        checks.append(("the ordinal budget is a step, not the continuous figure", coarse))
+        emit("  fullness \(CapacityEngine.predictedFullness(halfEaten)) of 5 → \(5 - CapacityEngine.predictedFullness(halfEaten)) steps left")
+        emit("  continuous budget \(String(format: "%.2f", halfEaten.remaining)) · ordinal budget \(String(format: "%.2f", ordinalBudget))")
+        emit("  \(runs ? "✅" : "❌") ordinal plan: \(ordinalPlan.items.map(\.dishName).joined(separator: " → "))")
+        emit("  \(coarse ? "✅" : "❌") it is a different budget, not the same number relabelled")
+        emit("  (continuous plan for contrast: \(continuousPlan.items.count) items, \(String(format: "%.2f", continuousPlan.totalSatietyCost)) satiety)")
+
+        emit("")
+        let failures = checks.filter { !$0.1 }.count
+        emit("the capacity model learns: \(failures == 0 ? "PASS" : "FAIL — \(failures) of \(checks.count) checks")")
         emit("")
     }
 

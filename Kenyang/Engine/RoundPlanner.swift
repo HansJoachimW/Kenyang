@@ -63,7 +63,8 @@ struct RoundPlanner {
                      candidates: [DishSighting],
                      events: [TasteEvent],
                      capacity: CapacityState,
-                     exclusions: [String]) -> RoundPlan {
+                     exclusions: [String],
+                     scale: CapacityScale = .continuous) -> RoundPlan {
 
         let partition = ExclusionValidator.partition(candidates, exclusions: exclusions)
         let allowed = partition.safe
@@ -77,7 +78,11 @@ struct RoundPlanner {
 
         guard !allowed.isEmpty else { return empty() }
 
-        let budget = min(capacity.remaining, CapacityEngine.platesToSatiety * 1.2)
+        // Under `.ordinal` the round is budgeted from the five coarse states instead of a
+        // continuous `S_max` — the fallback T64 may force, kept runnable by T65.
+        let available = scale == .ordinal ? CapacityEngine.ordinalRemaining(capacity)
+                                          : capacity.remaining
+        let budget = min(available, CapacityEngine.platesToSatiety * 1.2)
         guard budget > 0.2 else { return empty() }
 
         let learnSet = Set(objective.learnAbout.map { $0.lowercased() })

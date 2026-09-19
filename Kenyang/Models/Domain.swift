@@ -194,9 +194,31 @@ struct FlavourProfile: Codable, Hashable, Sendable {
     }
 }
 
+/// Which capacity model the planner budgets against.
+///
+/// `TESTS.md` T64 decides this and it needs a real meal: if `predictedFullness` turns out
+/// not to track what the diner actually reports, a continuous `S_max` is too precise to
+/// knapsack against and the plan has to run on the five coarse states instead. T65 is the
+/// check that the fallback *runs*, which is why it exists before the decision is taken.
+enum CapacityScale: Sendable {
+    case continuous, ordinal
+}
+
 struct CapacityState: Sendable {
     var maxSatiety: Double
     var spent: Double
+
+    /// The prior the within-meal correction is measured against. Equal to `maxSatiety`
+    /// until a fullness reading moves the estimate — testing the corrected figure against
+    /// the reading that produced it would be circular, and would make the capacity model
+    /// agree with itself by construction.
+    var declaredMax: Double
+
+    init(maxSatiety: Double, spent: Double, declaredMax: Double? = nil) {
+        self.maxSatiety = maxSatiety
+        self.spent = spent
+        self.declaredMax = declaredMax ?? maxSatiety
+    }
 
     var remaining: Double { max(0, maxSatiety - spent) }
     var fractionRemaining: Double { maxSatiety > 0 ? remaining / maxSatiety : 0 }

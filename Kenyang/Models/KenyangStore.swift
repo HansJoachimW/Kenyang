@@ -180,6 +180,10 @@ final class KenyangStore {
                     seatingLimitMinutes: Int?,
                     maxSatiety: Double) -> Visit {
         let restaurant = findOrCreate(named: restaurantName, pricePerHead: pricePerHead)
+        // Where the venue is, so the arrival trigger can recognise it next time. Silent
+        // and best-effort: it writes nothing unless location was already granted, and it
+        // never prompts in the middle of sitting down (§10b).
+        ProactiveTrigger.shared.noteLocation(of: restaurant)
         let visit = Visit(restaurant: restaurant,
                           pricePerHead: pricePerHead,
                           seatingLimitMinutes: seatingLimitMinutes,

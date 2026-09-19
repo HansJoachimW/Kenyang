@@ -12,6 +12,14 @@ final class Restaurant: Identifiable {
     /// the argument is unarguable. Added with a default, never renamed.
     var tierPrices: [Double] = []
     var createdAt: Date = Date.now
+    /// Where the venue is, for the arrival trigger (§10b). Recorded from the diner's own
+    /// position when a session starts there — you are at the venue, so your location is
+    /// the venue's — and never asked for as a separate step.
+    ///
+    /// Optional with a default, per `HANDOFF.md` fact 10: a stored property added without
+    /// one makes inferred migration refuse and `makeContainer` abort at launch.
+    var latitude: Double? = nil
+    var longitude: Double? = nil
     @Relationship(deleteRule: .cascade, inverse: \Visit.restaurant) var visits: [Visit]
 
     init(name: String, pricePerHead: Double = 0, tierNames: [String] = []) {

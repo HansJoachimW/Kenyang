@@ -140,11 +140,12 @@ struct CheckCapacityModelTool: Tool {
             await ToolContext.shared.note(name, result: "insufficient")
             return "checkCapacityModel = insufficient (no fullness reading this meal; the capacity estimate is unverified)"
         }
+        // The prior, not the corrected figure: `correctedMax` already moved the estimate
+        // toward this reading, so testing against it would report `consistent` whatever
+        // the diner said. One rule, shared with `CapacityEngine.verdict(for:)`.
         let predicted = CapacityEngine.predictedFullness(
-            CapacityState(maxSatiety: capacity.maxSatiety, spent: latest.cumulativeSatiety))
-        let delta = latest.value - predicted
-        let verdict: CapacityVerdict = delta >= 2 ? .overestimating
-            : delta <= -2 ? .underestimating : .consistent
+            CapacityState(maxSatiety: capacity.declaredMax, spent: latest.cumulativeSatiety))
+        let verdict = CapacityEngine.verdict(maxSatiety: capacity.declaredMax, readings: readings)
         await ToolContext.shared.note(name, result: verdict.rawValue)
         return "checkCapacityModel = \(verdict.rawValue) (predicted fullness \(predicted)/5, diner reported \(latest.value)/5)"
     }
