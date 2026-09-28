@@ -66,15 +66,24 @@ struct ExclusionValidator {
 }
 
 struct OutputValidator {
+    /// Phrases, not words, so inflections have to be listed. `"stuff yourself"` alone let
+    /// *"keep eating until you are stuffed"* through on 2026-09-28. `"gorge"` is kept to
+    /// its phrases because the bare stem also matches *gorgeous*.
     static let forbidden = [
         "money's worth", "moneys worth", "get your money",
         "as much as possible", "unlimited", "maximise quantity",
         "maximize quantity", "eat more", "fill up on", "no limit",
-        "stuff yourself", "worth the price by eating"
+        "stuff yourself", "worth the price by eating",
+        "stuffed", "stuffing yourself", "stuff themselves",
+        "keep eating", "keep going until", "until you are full", "until you're full",
+        "eat as much", "as much as you can", "gorge yourself", "gorging", "pig out",
+        "calorie", "for your money"
     ]
 
+    /// Curly apostrophes are normalised first — the model writes `’` as often as `'`,
+    /// and `money’s worth` matched nothing in the list above.
     static func isSafe(_ text: String) -> Bool {
-        let lower = text.lowercased()
+        let lower = text.lowercased().replacingOccurrences(of: "\u{2019}", with: "'")
         return !forbidden.contains { lower.contains($0) }
     }
 
@@ -297,6 +306,18 @@ struct GroundingGuard {
         let spoken = words(in: claim)
         return MenuCategory.allCases.first { category in
             guard category != .unknown, !present.contains(category) else { return false }
+            return !terms(for: category).isDisjoint(with: spoken)
+        }
+    }
+
+    /// The category on tonight's menu that the claim's own words name, if any. Used to
+    /// re-file a claim whose `category` field cannot be tested, without making the
+    /// headline and the category disagree.
+    static func spokenCategory(in claim: String, candidates: [DishSighting]) -> MenuCategory? {
+        let present = Set(candidates.map(\.category))
+        let spoken = words(in: claim)
+        return MenuCategory.allCases.first { category in
+            guard category != .unknown, present.contains(category) else { return false }
             return !terms(for: category).isDisjoint(with: spoken)
         }
     }

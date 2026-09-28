@@ -108,16 +108,7 @@ final class RoundAgent {
 
         let intent = await setIntent(hypothesis: hypothesis, input: input)
 
-        let objective: PlannerObjective
-        if let intent {
-            objective = PlannerObjective(reconShare: intent.reconShare,
-                                         learnAbout: intent.learnAbout,
-                                         avoidProfile: dominantRecentAxis(input.events),
-                                         posture: intent.riskPosture,
-                                         rationale: intent.rationale)
-        } else {
-            objective = PlannerObjective.balanced
-        }
+        let objective = Self.objective(from: intent, events: input.events)
 
         let plan = RoundPlanner.plan(objective: objective,
                                      candidates: input.sightings,
@@ -169,6 +160,18 @@ final class RoundAgent {
                 ).content
             }
 
+            // Asked before any rejection, not inside one: a claim that passes every
+            // guard used to keep `.unknown`, and `evaluateHypothesis` then answered
+            // `insufficient` for the whole meal.
+            let testable = testableCategory(for: h, input: input)
+            if testable != h.category {
+                trace.record(kind: .guardrail,
+                             title: "untestable category",
+                             detail: "Model filed the claim under \(h.category.rawValue), which evaluateHypothesis can only answer insufficient for — tested as \(testable.rawValue) instead",
+                             deterministic: true)
+                h.category = testable
+            }
+
             if let dead, h.category == dead {
                 trace.record(kind: .guardrail,
                              title: "pivot guard",
@@ -188,7 +191,7 @@ final class RoundAgent {
                              deterministic: true)
                 let computed = fallbackHypothesis(input)
                 h.claim = computed.claim
-                if h.category == .unknown || rejection.layer == .grounding {
+                if rejection.layer == .grounding {
                     h.category = computed.category
                 }
             }
@@ -436,6 +439,17 @@ final class RoundAgent {
                                expectedRating: .fine)
     }
 
+    /// The category `evaluateHypothesis` will actually be asked about. `.unknown`, or a
+    /// category with nothing on tonight's menu, can never be anything but `insufficient`,
+    /// so the falsification loop would disengage. The claim's own words are preferred so
+    /// the headline and the category agree; the computed best is the last resort.
+    func testableCategory(for h: ValueHypothesis, input: AgentInput) -> MenuCategory {
+        let present = Set(input.sightings.map(\.category))
+        guard h.category == .unknown || !present.contains(h.category) else { return h.category }
+        return GroundingGuard.spokenCategory(in: h.claim, candidates: input.sightings)
+            ?? fallbackHypothesis(input).category
+    }
+
     private func fallbackHypothesis(_ input: AgentInput) -> ValueHypothesis {
         let best = input.sightings
             .map { ($0.category, ValueEngine.valueDensity(for: $0, events: input.events)) }
@@ -447,7 +461,21 @@ final class RoundAgent {
                                expectedRating: .fine)
     }
 
-    private func dominantRecentAxis(_ events: [TasteEvent]) -> FlavourAxis? {
+    /// The model's chosen objective, in the planner's shape. **Shared, because the view
+    /// model re-plans too** — answering *"does it contain peanuts?"* changes the candidate
+    /// set and has to re-run the beam search under the objective the agent already chose.
+    /// Rebuilding this mapping at that call site would be a second copy of one rule, which
+    /// is the failure T80 and the prompt drift were both instances of.
+    static func objective(from intent: RoundIntent?, events: [TasteEvent]) -> PlannerObjective {
+        guard let intent else { return .balanced }
+        return PlannerObjective(reconShare: intent.reconShare,
+                                learnAbout: intent.learnAbout,
+                                avoidProfile: dominantRecentAxis(events),
+                                posture: intent.riskPosture,
+                                rationale: intent.rationale)
+    }
+
+    private static func dominantRecentAxis(_ events: [TasteEvent]) -> FlavourAxis? {
         let recent = events.suffix(3)
         guard recent.count >= 2 else { return nil }
         let axes = recent.flatMap { FlavourProfile.prior(for: $0.category).axes }

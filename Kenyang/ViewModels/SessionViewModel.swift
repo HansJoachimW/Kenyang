@@ -26,6 +26,14 @@ final class SessionViewModel {
     var hypothesis: ValueHypothesis?
     var intent: RoundIntent?
     var degradedMessage: String?
+    /// What this round actually put in front of the diner, accumulated across re-plans.
+    ///
+    /// The rating list used to read `plan.items` directly, which made it *"what is
+    /// currently proposed"* rather than *"what you ate"* — every re-plan silently
+    /// replaced it, and anything served under the previous plan became unrateable, so
+    /// its value observation was lost. Accepting still writes nothing: rating is what
+    /// records an event, and the capacity and value loops stay separate (§3f).
+    var servedItems: [PlannedItem] = []
     var roundIndex = 1
     var askBudget = AskBudget()
     var pathSignatures: [String] = []
@@ -105,7 +113,18 @@ final class SessionViewModel {
     /// The diner asked staff and came back with an answer. Re-planning afterwards is
     /// the point: a dish cleared mid-round should become plannable in that round, not
     /// the next one.
+    ///
+    /// **Only the beam search re-runs.** This used to call `beginPlanning()`, which runs
+    /// the whole agent — so answering *"does it contain peanuts?"* cost a `hypothesise`
+    /// call on round 1, and on later rounds went through `decide`, which could return
+    /// `pivot` and abandon the hypothesis because the diner answered a question about
+    /// nuts. It also threw the screen back to the wait, and spent a round of `LoopBudget`
+    /// per answer — three questions and `setIntent` starts being refused.
+    ///
+    /// Nothing the diner said about an ingredient is evidence about where the value is.
+    /// The candidate set changed; the objective did not.
     func answer(_ term: String, contains: Bool, for sighting: DishSighting) {
+        guard let visit else { return }
         if contains {
             store.flagExclusion(term, for: sighting)
         } else {
@@ -115,7 +134,17 @@ final class SessionViewModel {
                      title: "exclusion resolved",
                      detail: "\(sighting.name) · \(term) → \(contains ? "contains it" : "cleared by the diner")",
                      deterministic: true)
-        beginPlanning()
+
+        plan = RoundPlanner.plan(objective: RoundAgent.objective(from: intent,
+                                                                 events: visit.tasteEvents),
+                                 candidates: visit.sightings,
+                                 events: visit.tasteEvents,
+                                 capacity: CapacityEngine.state(for: visit),
+                                 exclusions: store.exclusions())
+        trace.record(kind: .plan,
+                     title: "re-planned",
+                     detail: "\(sighting.name) resolved — the candidate set changed, the objective did not.",
+                     deterministic: true)
     }
 
     func startSession(restaurantName: String,
@@ -130,6 +159,7 @@ final class SessionViewModel {
         store.addSightings(spread, to: visit)
         self.visit = visit
         self.roundIndex = 1
+        self.servedItems = []
         trace.clear()
         // Starting a session is the only thing that adds dishes — from a captured
         // menu or from the demo spread — so it is the one moment the Spotlight index
@@ -218,6 +248,12 @@ final class SessionViewModel {
     }
 
     func acceptPlan() {
+        // Accepting is what puts a dish in front of the diner, so it is what the rating
+        // list is built from. Appended rather than assigned: a round can be accepted,
+        // re-planned and accepted again, and the first plate does not stop existing.
+        for item in plan?.items ?? [] where !servedItems.contains(where: { $0.dishName == item.dishName }) {
+            servedItems.append(item)
+        }
         phase = .eating
         syncActivity()
     }
@@ -305,6 +341,8 @@ final class SessionViewModel {
 
     func nextRound() {
         roundIndex += 1
+        // A new round is the one moment the rating list legitimately empties.
+        servedItems = []
         beginPlanning()
     }
 

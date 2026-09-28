@@ -160,7 +160,7 @@ enum BranchBattery {
                 Your hypothesis was: \(scenario.claim)
                 Call evaluateHypothesis for the \(scenario.category.rawValue), \
                 getRemainingCapacity, and checkCapacityModel to see whether the \
-                remaining budget can still be trusted. Then decide.
+                remaining capacity can still be trusted. Then decide.
                 """
 
             do {

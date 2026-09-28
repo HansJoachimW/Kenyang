@@ -38,7 +38,7 @@ enum Fixtures {
     static func hypothesisPrompt(_ input: AgentInput) -> String {
         """
         Round \(input.roundIndex). Use the tools to see the spread, the \
-        constraints and how much budget is left, then say where the value \
+        constraints and how much capacity is left, then say where the value \
         is concentrated and what rating you expect from that category.
         """
     }
@@ -61,7 +61,7 @@ enum Fixtures {
         sashimi and oysters are rationed, which is the house telling you what \
         it costs them.
         Call evaluateHypothesis for the raw category, getRemainingCapacity, and \
-        checkCapacityModel to see whether the remaining budget can still be \
+        checkCapacityModel to see whether the remaining capacity can still be \
         trusted. Then decide.
         """
     }

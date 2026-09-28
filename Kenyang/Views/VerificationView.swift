@@ -111,7 +111,7 @@ struct VerificationView: View {
         [
             Harness(id: "--verify",
                     name: "App battery",
-                    detail: "10 checks — capture, entities, guardrails, tools, agent paths",
+                    detail: "26 checks — capture, entities, guardrails, tools, agent paths",
                     rendersInApp: true) { await runner.runAll() },
             Harness(id: "--token-audit",
                     name: "Token audit",

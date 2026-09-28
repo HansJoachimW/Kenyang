@@ -59,7 +59,7 @@ enum GrowthAudit {
             let prompt = """
                 Round \(round). The diner has eaten and rated these already:
                 \(history.isEmpty ? "- nothing yet" : history)
-                The tools say the hypothesis is contradicted and the budget estimate \
+                The tools say the hypothesis is contradicted and the capacity estimate \
                 is unreliable. Choose the next move and say why.
                 """
 

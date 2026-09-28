@@ -21,12 +21,15 @@ struct RootView: View {
 struct SessionView: View {
     @Bindable var model: SessionViewModel
     @State private var showingVerification = false
+    /// `KenyangStore` is not observable, so a venue seeded from the Verify sheet never
+    /// reached the start screen until relaunch. Closing the sheet rebuilds it.
+    @State private var storeRevision = 0
 
     var body: some View {
         NavigationStack {
             Group {
                 switch model.phase {
-                case .idle:              StartView(model: model)
+                case .idle:              StartView(model: model).id(storeRevision)
                 case .planning:          PlanningView(model: model)
                 case .awaitingApproval:  RoundPlanView(model: model)
                 case .eating:            EatingView(model: model)
@@ -48,7 +51,7 @@ struct SessionView: View {
             .sheet(isPresented: $model.showTrace) {
                 TraceView(trace: model.trace)
             }
-            .sheet(isPresented: $showingVerification) {
+            .sheet(isPresented: $showingVerification, onDismiss: { storeRevision += 1 }) {
                 VerificationView(trace: model.trace)
             }
         }
@@ -307,7 +310,9 @@ struct EatingView: View {
                 }
             }
             Section("Rate what you ate") {
-                ForEach(model.plan?.items ?? []) { item in
+                // `servedItems`, not `plan?.items` — the plan is replaced on every
+                // re-plan and this list must not lose a dish that was already served.
+                ForEach(model.servedItems) { item in
                     HStack {
                         Text(item.dishName)
                         Spacer()

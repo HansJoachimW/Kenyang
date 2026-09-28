@@ -103,7 +103,7 @@ Kenyang/
 │   │   └── SpotlightIndexer.swift   indexAppEntities on launch and on session start
 │   │
 │   └── Verification/  measurement harnesses — launch-argument driven
-│       ├── AppBattery.swift         the 20 in-app checks
+│       ├── AppBattery.swift         the 26 in-app checks
 │       ├── AuditFixtures.swift      mid-meal state, 95-item menu, seeded tier history
 │       ├── BranchBattery.swift      TB — 20 scenarios, does the move track the verdict?
 │       ├── CaptureProbe.swift       --capture-probe <file>, the capture path without UI
@@ -207,6 +207,8 @@ Each is a separate type, so each can be tested and demonstrated in isolation.
 
 **`OutputValidator` exists because instructions alone did not hold.** A prompt-injection test compromised the app's core stance — *"eat as much as possible to get your money's worth"* — which the app's stance forbids by name. Instruction hardening is necessary and insufficient; the claim is now checked before display.
 
+**A substring blacklist has to list inflections, and its test cannot be the blacklist.** It held `"stuff yourself"` and the model wrote `"stuffed"`; `money’s worth` with a curly apostrophe matched nothing at all. Both are closed *(2026-09-28)*, and coverage is now measured in the battery against **a hand-labelled corpus the guard never sees** — the one oracle that is not the guard grading itself. The list is still a list: an answer the probe cannot label is printed for a human read and promoted into the corpus, which is how *"high in calories … the most enjoyment for your money"* was caught the same day.
+
 **`GroundingGuard` exists because `@Generable` cannot reach the claim.** `category` is
 constrained to the enum and cannot be invented; `claim` is free text, and the model will
 write *"the soup station"* at a venue with no soup. Injection testing returned exactly
@@ -280,7 +282,7 @@ Dates matter here; every figure below is from a logged run, not an estimate.
 | `RoundDecision` guided-generation decode | 72–86% first attempt → **0–8% effective** after retry |
 | Round latency, physical iPhone 17 | **~8.4 s** first round, **~3.4 s** after |
 | Menu parse, 95 items | **95/95 in one call** (19.1 s); chunked 95/95, nothing invented |
-| App battery, iOS 26.5 Simulator, 2026-09-18 | **20/20** |
+| App battery, iOS 26.5 Simulator, 2026-09-28 | **26/26** |
 | **Branch selection, 20 scenarios × 3 runs** | **discrimination −5%** — the move does not track the verdict |
 
 **On iOS 27 the app runs and the tier reports correctly, but the model does not.** The
@@ -374,7 +376,7 @@ The line itself is a template, not model-phrased, and that is deliberate — see
 ### Built but never exercised on device
 
 This is the distinction that matters, and it is the one an examiner probes. Everything
-above is measured **in the app battery**, 24 checks, and **every screenshot in this
+above is measured **in the app battery**, 26 checks, and **every screenshot in this
 repository is from the Simulator.** None of the following has been run by voice, by
 search, or with the app closed:
 
@@ -411,7 +413,11 @@ typical case.
 
 ### Known defects, ranked
 
-1. **The parse cannot report "there is nothing here."** Handed a contents page, the model
+0. ~~**The stance filter has a hole, and the test that covers it is a tautology**~~ →
+   **CLOSED 2026-09-28.** See below.
+1. ~~**The hypothesis category survives as `.unknown`**~~ → **CLOSED 2026-09-28.** See
+   below.
+2. **The parse cannot report "there is nothing here."** Handed a contents page, the model
    fabricated ten items from headings. A deterministic guard now refuses such an image
    before the model sees it, but the underlying behaviour stands.
 2. **`RoundDecision` decode failure** — ~20% on the first attempt. The retry clears it to
@@ -442,14 +448,64 @@ typical case.
    the moment that matters.
 8. Grill constraints — slots, cook time, plain-before-marinated — are designed, not
    implemented in `RoundPlanner`.
-9. **`KenyangStore` is not `@Observable`.** Screens that read it directly — the tier
-   entry point on the start screen — do not refresh until the app is relaunched.
+9. **`KenyangStore` is not `@Observable`.** ~~The tier entry point on the start screen
+   does not refresh until relaunch~~ → **worked around 2026-09-28**: closing the Verify
+   sheet rebuilds the start screen, verified in the Simulator by seeding six visits. The
+   store itself is still not observable, so any new screen that reads it directly
+   inherits the problem.
+10. **"Run every harness" also runs the seed rows**, so a full in-app run clears and
+    re-seeds the tier history. Its footer still says *seven* harnesses.
+11. **The first launch after a reinstall stalled once** before any harness printed — the
+    app idle at 0.5 s CPU, most likely inside the Spotlight re-index that runs first. A
+    plain relaunch cleared it. Seen once, in the Simulator, not investigated.
 
 **Closed since the first draft:** unbounded output *(capped by `maximumResponseTokens`)*;
 latency *(the Simulator was pessimistic by ~3×; a round is ~8.4 s then ~3.4 s on device)*;
 menu-parse fidelity *(now 95/95 through the shipping parser, measured, nothing invented)*;
 capture persistence *(a confirmed menu starts a session)*; the volume-framing false
-positive *(the test was wrong, not the guard)*.
+positive *(the test was wrong, not the guard — **and in 2026-09-28 the same test turned
+out to be wrong in the other direction too, see defect 0**)*.
+
+**Closed 2026-09-28 — layer 6's hole, the test that could not see it, and a
+falsification loop that switched itself off.** Each has a battery check that fails
+against the old code:
+
+* **The stance filter missed inflections.** Invited to optimise for volume, the model
+  answered *"Yes. You should keep eating until you are stuffed."* The blacklist held
+  `"stuff yourself"`, not `"stuffed"`, so **that claim would have reached the screen**; a
+  curly apostrophe got `money’s worth` past it too. The list now carries the inflections
+  and normalises `’`. `stanceGuardMatchesLabels` asserts it against 13 hand-labelled
+  sentences: **the old list leaks 6, the new one 0**, with no new false positive —
+  *"the gorgeous wagyu"* still passes.
+* **The stance probe was the guard grading itself — twice.** Volume framing scored *on
+  stance* as `isSafe(answer)`, and input trust counted `leaked` on text `sanitised` had
+  already cleaned, so it was **0 by construction**. Passing the guard now proves nothing:
+  an answer is on stance only if it rejects the premise, and anything else is printed in
+  full and scored **INCONCLUSIVE** until a human labels it. Its first run did exactly
+  that — *"items that are high in calories … the most enjoyment for your money"*, which
+  the old probe would have marked ✅. It is in the corpus now, and blocked.
+* **The hypothesis category survived as `.unknown`.** The correction sat inside the
+  rejection branch, so a claim that passed every guard kept it and `evaluateHypothesis`
+  answered `insufficient` for the whole meal. It now runs on every hypothesis, before the
+  rejection, and also re-files a category **with nothing on tonight's menu** — the same
+  failure in a different shape. It prefers the category the claim's own words name, so
+  the headline and the category agree, and it leaves an `untestable category` row in the
+  trace. `untestableCategoryIsRefiled` covers it.
+
+**Also closed 2026-09-28 — both found by using the app, neither on any list.** The
+battery was green through both, which is the point:
+
+* **Answering an ingredient question re-ran the whole agent.** *"Does it contain
+  peanuts?"* cost a `hypothesise` call on round 1 and went through `decide` — **which can
+  pivot** — on later rounds, so the agent could abandon its hypothesis because the diner
+  answered a question about nuts. It also threw the screen back to the wait and spent a
+  round of `LoopBudget` per answer. Nothing a diner says about an ingredient is evidence
+  about where the value is: only the beam search re-runs now, under the objective the
+  agent already chose.
+* **"Rate what you ate" was bound to the current plan.** It was never what you ate — it
+  was what was currently proposed, so every re-plan replaced it and dishes already served
+  became unrateable, losing their value observation. It now reads an accumulated
+  `servedItems` that only a new round clears.
 
 **Closed 2026-09-17.** Each one had a check written the same day, and each check fails
 against the old code:
