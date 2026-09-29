@@ -298,11 +298,63 @@ final class RoundAgent {
         }
     }
 
-    private func setIntent(hypothesis: ValueHypothesis, input: AgentInput) async -> RoundIntent? {
+    /// Adjust. The diner rejected this round's objective, so only SET_INTENT runs again,
+    /// with the rejected objective and the diner's direction as input. The hypothesis is
+    /// left alone: a rejected plan is not evidence about where the value is — only
+    /// ratings are.
+    func adjust(_ input: AgentInput,
+                hypothesis: ValueHypothesis?,
+                rejected: RoundIntent,
+                direction: AdjustDirection?) async -> (RoundPlan, RoundIntent) {
+        var intent: RoundIntent?
+        budget.restartClock()
+        if ModelAvailability.current().isReady {
+            intent = await setIntent(hypothesis: hypothesis, input: input,
+                                     adjusting: (rejected, direction))
+        }
+
+        let asked = direction?.label ?? "no reason given"
+        let adjusted: RoundIntent
+        if let intent, AdjustGuard.accepts(intent, rejected: rejected, direction: direction) {
+            adjusted = intent
+        } else {
+            adjusted = AdjustGuard.fallback(from: rejected, direction: direction)
+            trace.record(kind: .guardrail,
+                         title: "adjust guard",
+                         detail: intent.map {
+                             "Asked: \(asked). The model chose recon=\($0.reconShare.rawValue) posture=\($0.riskPosture.rawValue), which did not move that way — stepped to recon=\(adjusted.reconShare.rawValue) posture=\(adjusted.riskPosture.rawValue)."
+                         } ?? "Asked: \(asked). No objective from the model — stepped to recon=\(adjusted.reconShare.rawValue) posture=\(adjusted.riskPosture.rawValue).",
+                         deterministic: true)
+        }
+
+        let objective = Self.objective(from: adjusted, events: input.events)
+        let plan = RoundPlanner.plan(objective: objective,
+                                     candidates: input.sightings,
+                                     events: input.events,
+                                     capacity: input.capacity,
+                                     exclusions: input.exclusions)
+        trace.record(kind: .plan, title: "plan (adjusted)", detail: describe(plan), deterministic: true)
+        return (plan, adjusted)
+    }
+
+    private func setIntent(hypothesis: ValueHypothesis?,
+                           input: AgentInput,
+                           adjusting: (rejected: RoundIntent, direction: AdjustDirection?)? = nil) async -> RoundIntent? {
         guard consume("setIntent") else { return nil }
         progress?.begin(.setIntent)
         defer { progress?.finish(.setIntent) }
         let names = input.sightings.map(\.name).joined(separator: ", ")
+        // The rejected objective was the model's own, already sanitised; the direction
+        // is one of three fixed sentences. Nothing the diner typed reaches the prompt.
+        let rejection = adjusting.map { rejected, direction in
+            """
+
+            The diner rejected this objective: recon=\(rejected.reconShare.rawValue) \
+            posture=\(rejected.riskPosture.rawValue) — \(rejected.rationale) \
+            \(direction?.promptLine ?? "They gave no reason.") Set a different objective.
+            """
+        } ?? ""
+        let claim = hypothesis.map { "Hypothesis: \($0.claim)" } ?? "No hypothesis yet."
         let session = AgentCapabilities.session(instructions: Self.instructions)
         do {
             var intent = try await retrying("setIntent", narrowed: {
@@ -310,7 +362,7 @@ final class RoundAgent {
                     to: """
                         Round \(input.roundIndex). Capacity left: about \
                         \(String(format: "%.1f", input.capacity.plateEstimate)) plates.
-                        Set the objective for this round. Leave learnAbout empty.
+                        Set the objective for this round. Leave learnAbout empty.\(rejection)
                         """,
                     generating: RoundIntent.self,
                     options: AgentCapabilities.bounded(400)
@@ -321,8 +373,8 @@ final class RoundAgent {
                         Dishes available: \(names)
                         Round \(input.roundIndex). Capacity left: about \
                         \(String(format: "%.1f", input.capacity.plateEstimate)) plates. \
-                        Hypothesis: \(hypothesis.claim)
-                        Set the objective for this round.
+                        \(claim)
+                        Set the objective for this round.\(rejection)
                         """,
                     generating: RoundIntent.self,
                     options: AgentCapabilities.bounded(400)
@@ -500,7 +552,7 @@ final class RoundAgent {
                 : "no plannable dishes")
         } else {
             parts.append(plan.items
-                .map { "\($0.dishName) (\($0.isRecon ? "recon" : "exploit"), \($0.portion.rawValue))" }
+                .map { "\($0.dishName) ×\($0.quantity) (\($0.isRecon ? "recon" : "exploit"))" }
                 .joined(separator: " → "))
             parts.append("costs \(String(format: "%.2f", plan.totalSatietyCost)) satiety")
         }

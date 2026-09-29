@@ -254,18 +254,52 @@ final class KenyangStore {
 
     var pendingLog: PendingLog?
 
-    /// The next thing in the round the diner has not logged yet, in **plan order**.
+    /// The next order in the round the diner has not logged yet, in **plan order**.
     /// Beam search already ranked the round, so plan order is the disambiguator — that
-    /// is what lets one press resolve without a picker, an unlock or a screen.
+    /// is what lets one press resolve without a picker, an unlock or a screen. A dish
+    /// planned as two orders stays next until both are logged.
     func nextUnloggedItem(in plan: RoundPlan, visit: Visit) -> (item: PlannedItem, index: Int)? {
         let round = currentRound(in: visit)
-        let logged = Set(visit.tasteEvents
-            .filter { $0.roundIndex == round }
-            .map { $0.dishName.lowercased() })
-        for (index, item) in plan.items.enumerated() where !logged.contains(item.dishName.lowercased()) {
+        for (index, item) in plan.items.enumerated()
+        where orders(of: item.dishName, in: visit, round: round).count < item.quantity {
             return (item, index)
         }
         return nil
+    }
+
+    /// Every order of one dish logged in one round, rated or not.
+    func orders(of dishName: String, in visit: Visit, round: Int) -> [TasteEvent] {
+        visit.tasteEvents.filter {
+            $0.roundIndex == round && $0.dishName.caseInsensitiveCompare(dishName) == .orderedSame
+        }
+    }
+
+    /// One rating per dish per round. Capacity counts every order, but the value loop
+    /// gets one observation however many plates were eaten — two plates of the same
+    /// dish are not two independent opinions — so rating again replaces it. With
+    /// nothing logged yet, rating is also the log of one order. Returns `true` when an
+    /// earlier rating was replaced.
+    @discardableResult
+    func setRating(_ rating: Rating,
+                   dishName: String,
+                   category: MenuCategory,
+                   in visit: Visit,
+                   roundIndex: Int) -> Bool {
+        let logged = orders(of: dishName, in: visit, round: roundIndex)
+        if let rated = logged.first(where: \.isRated) {
+            rated.ratingRaw = rating.rawValue
+            save()
+            return true
+        }
+        if let unrated = logged.first {
+            unrated.isRated = true
+            unrated.ratingRaw = rating.rawValue
+            save()
+            return false
+        }
+        rate(dishName: dishName, category: category, rating: rating,
+             portion: .normal, in: visit, roundIndex: roundIndex)
+        return false
     }
 
     func delete(_ event: TasteEvent) {

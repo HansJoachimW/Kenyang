@@ -6,13 +6,15 @@ struct PlannedItem: Identifiable, Sendable {
     let category: MenuCategory
     let portion: PortionBucket
     let isRecon: Bool
+    /// For all of its orders.
     let satietyCost: Double
     /// One line naming the arithmetic that put this dish here. The model contributes the
     /// claim and the objective; the ordering is beam search over that objective, and the
     /// screen says which is which rather than letting the plan read as one voice.
     var reason: String = ""
-    /// How many portions of it. Beam search never repeats a dish, so this is 1 today and
-    /// exists because the row renders it.
+    /// How many orders. An order-based buffet serves printed plates, not tastes, so an
+    /// untried dish is one order — enough to learn from — and only a dish the ratings
+    /// back can be ordered again.
     var quantity: Int = 1
 }
 
@@ -58,6 +60,8 @@ struct PlannerObjective: Sendable {
 struct RoundPlanner {
     static let beamWidth = 24
     static let maxItems = 4
+    static let maxOrders = 6
+    static let maxOrdersPerDish = 3
 
     static func plan(objective: PlannerObjective,
                      candidates: [DishSighting],
@@ -89,11 +93,8 @@ struct RoundPlanner {
 
         // Reconnaissance is a property of the dish, not of its position in the list.
         // A dish nobody has rated cannot be exploited — there is nothing to exploit —
-        // and a dish the agent asked to learn about is a taste by definition. Deciding
-        // it once, here, is what keeps the beam search costing the portion it will
-        // actually serve: the search used to price every candidate at `.normal` and the
-        // emitted plan then served 0.4× tastes, so a first round at a new venue spent
-        // 40% of the budget it had been allocated.
+        // and a dish the agent asked to learn about is recon by definition. Recon is one
+        // order; only an exploit dish may be ordered again.
         func isRecon(_ sighting: DishSighting) -> Bool {
             if learnSet.contains(sighting.name.lowercased()) { return true }
             return ValueEngine.posterior(dishName: sighting.name,
@@ -101,12 +102,13 @@ struct RoundPlanner {
                                          events: events).sampleCount == 0
         }
 
-        func portion(_ sighting: DishSighting) -> PortionBucket {
-            isRecon(sighting) ? .taste : .normal
+        func orderLimit(_ sighting: DishSighting) -> Int {
+            isRecon(sighting) ? 1 : maxOrdersPerDish
         }
 
+        // One order is one printed plate, and the search prices exactly what it serves.
         func cost(_ sighting: DishSighting) -> Double {
-            ValueEngine.satietyCost(for: sighting, portion: portion(sighting))
+            ValueEngine.satietyCost(for: sighting, portion: .normal)
         }
 
         func score(_ sighting: DishSighting, alreadyChosen: [DishSighting]) -> Double {
@@ -147,12 +149,19 @@ struct RoundPlanner {
 
         var beam: [[DishSighting]] = [[]]
 
-        for _ in 0..<maxItems {
+        // A path is a list of orders, so a dish may appear more than once. The satiety
+        // discount in `score` sees the repeats as history, which is what prices a second
+        // plate of the same thing below the first.
+        for _ in 0..<maxOrders {
             var expanded: [(path: [DishSighting], score: Double)] = []
             for path in beam {
                 let used = path.reduce(0.0) { $0 + cost($1) }
-                for candidate in allowed where !path.contains(where: { $0.name == candidate.name }) {
-                    guard used + cost(candidate) <= budget else { continue }
+                let dishes = Set(path.map(\.name))
+                for candidate in allowed {
+                    let orders = path.filter { $0.name == candidate.name }.count
+                    guard orders < orderLimit(candidate),
+                          orders > 0 || dishes.count < maxItems,
+                          used + cost(candidate) <= budget else { continue }
                     let next = path + [candidate]
                     let total = next.enumerated().reduce(0.0) { acc, pair in
                         acc + score(pair.element, alreadyChosen: Array(next.prefix(pair.offset)))
@@ -176,13 +185,19 @@ struct RoundPlanner {
             return empty()
         }
 
-        let items = orderForSatiety(best).map { sighting -> PlannedItem in
-            PlannedItem(dishName: sighting.name,
-                        category: sighting.category,
-                        portion: portion(sighting),
-                        isRecon: isRecon(sighting),
-                        satietyCost: cost(sighting),
-                        reason: reason(for: sighting, events: events))
+        var distinct: [DishSighting] = []
+        for sighting in best where !distinct.contains(where: { $0.name == sighting.name }) {
+            distinct.append(sighting)
+        }
+        let items = orderForSatiety(distinct).map { sighting -> PlannedItem in
+            let quantity = best.filter { $0.name == sighting.name }.count
+            return PlannedItem(dishName: sighting.name,
+                               category: sighting.category,
+                               portion: .normal,
+                               isRecon: isRecon(sighting),
+                               satietyCost: cost(sighting) * Double(quantity),
+                               reason: reason(for: sighting, events: events),
+                               quantity: quantity)
         }
 
         return RoundPlan(items: items,
@@ -202,7 +217,7 @@ struct RoundPlanner {
         let good = rated.filter { $0.rating == .good }.count
 
         if rated.isEmpty {
-            return "Never rated here. Cheap to learn — one taste, low satiety cost."
+            return "Never rated here. One order to learn from."
         }
         if good > 0 {
             return "Rated good \(good) of \(rated.count) time\(rated.count == 1 ? "" : "s")."

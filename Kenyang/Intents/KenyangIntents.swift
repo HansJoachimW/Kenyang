@@ -416,18 +416,25 @@ struct AdjustRoundIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         guard let visit = store.activeVisit() else { return .result() }
-        // A different objective, not a re-roll of the same one: more recon and a
-        // bolder posture is what "adjust" means to a diner who did not like the plan.
-        let objective = PlannerObjective(reconShare: .most,
-                                         learnAbout: [],
-                                         avoidProfile: nil,
-                                         posture: .aggressive,
-                                         rationale: "Adjusted — more of this round spent finding out.")
-        store.lastPlan = RoundPlanner.plan(objective: objective,
-                                           candidates: visit.sightings,
-                                           events: visit.tasteEvents,
-                                           capacity: CapacityEngine.state(for: visit),
-                                           exclusions: store.exclusions())
+        // The same agent step as the in-app Adjust, told only that the plan was
+        // rejected — one button in a snippet has no room to ask which way. The
+        // objective being turned down is the one the snippet is showing.
+        let shown = store.lastPlan
+        let rejected = RoundIntent(rationale: shown?.rationale ?? PlannerObjective.balanced.rationale,
+                                   reconShare: shown?.reconShare ?? PlannerObjective.balanced.reconShare,
+                                   learnAbout: [],
+                                   riskPosture: shown?.posture ?? PlannerObjective.balanced.posture)
+        let input = AgentInput(sightings: visit.sightings,
+                               events: visit.tasteEvents,
+                               capacity: CapacityEngine.state(for: visit),
+                               minutesRemaining: visit.minutesRemaining,
+                               exclusions: store.exclusions(),
+                               basisRecords: store.basisRecords(),
+                               roundIndex: store.currentRound(in: visit),
+                               currentHypothesis: nil)
+        let (plan, _) = await RoundAgent(trace: TraceLog()).adjust(input, hypothesis: nil,
+                                                                  rejected: rejected, direction: nil)
+        store.lastPlan = plan
         RoundSnippetIntent.reload()
         return .result()
     }
@@ -442,7 +449,7 @@ struct PlanSnippet: View {
             Text(plan.rationale).font(.footnote).foregroundStyle(.secondary)
             ForEach(plan.items) { item in
                 HStack {
-                    Text(item.dishName).font(.subheadline)
+                    Text("\(item.dishName) ×\(item.quantity)").font(.subheadline)
                     Spacer()
                     Text(item.isRecon ? "recon" : "exploit")
                         .font(.caption2).foregroundStyle(.secondary)
@@ -519,7 +526,8 @@ struct ReceiptSnippet: View {
                 HStack {
                     Text(item.dishName).font(.footnote)
                     Spacer()
-                    Text(item.portion.rawValue).font(.caption2).foregroundStyle(.secondary)
+                    Text(item.quantity == 1 ? "1 order" : "\(item.quantity) orders")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
             }
             if let plan { DeferToStaffNote(plan: plan) }

@@ -71,14 +71,22 @@ struct KenyangApp: App {
         case .rateGood, .rateSkip:
             // Unlike the Action Button this rates, because the Island names the dish
             // directly above the buttons — the diner can see what they are answering.
+            // Each tap is one plate of the target eaten; the rating is the dish's, set
+            // or replaced, so two plates of Karubi are one opinion about Karubi.
             guard let plan = store.lastPlan,
                   let next = store.nextUnloggedItem(in: plan, visit: visit) else { return }
+            let round = store.currentRound(in: visit)
             store.rate(dishName: next.item.dishName,
                        category: next.item.category,
-                       rating: command == .rateGood ? .good : .skip,
-                       portion: next.item.portion,
+                       rating: nil,
+                       portion: .normal,
                        in: visit,
-                       roundIndex: store.currentRound(in: visit))
+                       roundIndex: round)
+            store.setRating(command == .rateGood ? .good : .skip,
+                            dishName: next.item.dishName,
+                            category: next.item.category,
+                            in: visit,
+                            roundIndex: round)
             LiveActivityController.shared.refresh(visit: visit, store: store)
         }
     }

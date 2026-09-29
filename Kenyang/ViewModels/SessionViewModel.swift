@@ -63,23 +63,40 @@ final class SessionViewModel {
         trace.entries.contains { $0.kind == .decision && $0.title == "pivot" }
     }
 
-    /// What Adjust means to a diner who did not like the plan: more of this round spent
-    /// finding out, and a bolder posture. Not a re-roll of the same objective.
-    func adjustRound() {
+    /// The diner rejected this round's objective. The agent sets a new one with the
+    /// rejection as input; the hypothesis stays, and the screen shows the new objective
+    /// rather than the one that was turned down.
+    func adjustRound(_ direction: AdjustDirection) {
         guard let visit else { return }
-        plan = RoundPlanner.plan(objective: PlannerObjective(reconShare: .most,
-                                                             learnAbout: [],
-                                                             avoidProfile: nil,
-                                                             posture: .aggressive,
-                                                             rationale: "Adjusted — more of this round spent finding out."),
-                                 candidates: visit.sightings,
-                                 events: visit.tasteEvents,
-                                 capacity: CapacityEngine.state(for: visit),
-                                 exclusions: store.exclusions())
+        let rejected = intent ?? RoundIntent(rationale: PlannerObjective.balanced.rationale,
+                                             reconShare: PlannerObjective.balanced.reconShare,
+                                             learnAbout: [],
+                                             riskPosture: PlannerObjective.balanced.posture)
         trace.record(kind: .plan,
-                     title: "adjusted",
-                     detail: "The diner rejected the plan; re-planned at recon=most, posture=aggressive.",
+                     title: "adjust requested",
+                     detail: "The diner rejected recon=\(rejected.reconShare.rawValue) posture=\(rejected.riskPosture.rawValue) — \(direction.label).",
                      deterministic: true)
+        let input = AgentInput(sightings: visit.sightings,
+                               events: visit.tasteEvents,
+                               capacity: CapacityEngine.state(for: visit),
+                               minutesRemaining: visit.minutesRemaining,
+                               exclusions: store.exclusions(),
+                               basisRecords: store.basisRecords(),
+                               roundIndex: roundIndex,
+                               currentHypothesis: hypothesis)
+        phase = .planning
+        progress.reset()
+        planningTask?.cancel()
+        planningTask = Task { [weak self] in
+            guard let self else { return }
+            let (plan, adjusted) = await agent.adjust(input, hypothesis: hypothesis,
+                                                      rejected: rejected, direction: direction)
+            guard !Task.isCancelled, phase == .planning else { return }
+            self.plan = plan
+            self.intent = adjusted
+            self.degradedMessage = nil
+            phase = .awaitingApproval
+        }
     }
 
     init(store: KenyangStore, trace: TraceLog? = nil) {
@@ -300,22 +317,45 @@ final class SessionViewModel {
 
     func rate(_ item: PlannedItem, rating: Rating) {
         guard let visit else { return }
-        if let hypothesis, item.category == hypothesis.category {
+        let replaced = store.setRating(rating,
+                                       dishName: item.dishName,
+                                       category: item.category,
+                                       in: visit,
+                                       roundIndex: roundIndex)
+        // Once per dish per round, like the rating itself — a changed mind is not a
+        // second outcome for the basis calibration to count.
+        if !replaced, let hypothesis, item.category == hypothesis.category {
             store.recordBasisOutcome(basis: hypothesis.basis,
                                      expected: hypothesis.expectedRating,
                                      actual: rating)
         }
-        store.rate(dishName: item.dishName,
-                   category: item.category,
-                   rating: rating,
-                   portion: item.portion,
-                   in: visit,
-                   roundIndex: roundIndex)
         trace.record(kind: .toolCall,
                      title: "rateDish",
-                     detail: "\(item.dishName) → \(rating.rawValue)",
+                     detail: "\(item.dishName) → \(rating.rawValue)\(replaced ? " (replaced)" : "")",
                      deterministic: true)
         syncActivity()
+    }
+
+    /// One more plate of it eaten. Capacity only — the rating is separate (§3e).
+    func logOrder(_ item: PlannedItem) {
+        guard let visit else { return }
+        store.rate(dishName: item.dishName,
+                   category: item.category,
+                   rating: nil,
+                   portion: .normal,
+                   in: visit,
+                   roundIndex: roundIndex)
+        syncActivity()
+    }
+
+    func ordersEaten(_ item: PlannedItem) -> Int {
+        guard let visit else { return 0 }
+        return store.orders(of: item.dishName, in: visit, round: roundIndex).count
+    }
+
+    func rating(of item: PlannedItem) -> Rating? {
+        guard let visit else { return nil }
+        return store.orders(of: item.dishName, in: visit, round: roundIndex).first(where: \.isRated)?.rating
     }
 
     func rate(dishNamed name: String, rating: Rating, portion: PortionBucket = .normal) {
@@ -411,6 +451,19 @@ final class SessionViewModel {
         self.visit = nil
         self.plan = nil
         self.hypothesis = nil
+        phase = .idle
+    }
+
+    /// Stop in the Live Activity ends the visit in the app's process without passing
+    /// through here, so this screen kept showing a meal that was already over. Called
+    /// whenever the app comes back to the foreground.
+    func reconcileWithStore() {
+        guard let visit, visit.endedAt != nil else { return }
+        pathSignatures.append(trace.pathSignature)
+        self.visit = nil
+        self.plan = nil
+        self.hypothesis = nil
+        self.servedItems = []
         phase = .idle
     }
 

@@ -22,6 +22,7 @@ import SwiftUI
 /// never a warning, never a nudge, never absent.
 struct RoundPlanView: View {
     let model: SessionViewModel
+    @State private var adjusting = false
 
     private var plan: RoundPlan? { model.plan }
 
@@ -168,9 +169,8 @@ struct RoundPlanView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(item.dishName).font(.headline).foregroundStyle(Palette.ink)
-                        if item.portion == .taste {
-                            Text("taste").font(.caption).foregroundStyle(Palette.muted)
-                        }
+                        Text(item.quantity == 1 ? "1 order" : "\(item.quantity) orders")
+                            .font(.caption).foregroundStyle(Palette.muted)
                         Spacer()
                         RoundRoleBadge(isRecon: item.isRecon)
                     }
@@ -236,7 +236,12 @@ struct RoundPlanView: View {
             .tint(Palette.accent)
             .controlSize(.large)
             HStack {
-                Button("Adjust") { model.adjustRound() }
+                Button("Adjust") { adjusting = true }
+                    .confirmationDialog("Adjust this round", isPresented: $adjusting, titleVisibility: .visible) {
+                        ForEach(AdjustDirection.allCases, id: \.self) { direction in
+                            Button(direction.label) { model.adjustRound(direction) }
+                        }
+                    }
                 Spacer()
                 // Never a warning, never a nudge, never absent.
                 Button("Stop here") { model.endSession() }

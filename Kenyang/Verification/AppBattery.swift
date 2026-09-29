@@ -44,11 +44,14 @@ final class VerificationRunner {
         untestableCategoryIsRefiled()
         actionButtonLogsInPlanOrder()
         inAppPlanReachesSystemSurfaces()
+        stopFromActivityReachesTheApp()
         activityStateTracksTheMeal()
         capacityModelLearns()
         await proactiveStaysQuiet()
         minorSurfacesAreWired()
         planSpendsWhatItBudgets()
+        oneRatingPerDishPerRound()
+        await adjustMovesTheWayAsked()
         await budgetExhaustionIsVisible()
         await modelTierIsDeclared()
         refusesOneSample()
@@ -547,43 +550,152 @@ final class VerificationRunner {
     }
 
     private func planSpendsWhatItBudgets() {
-        emit("──── the plan serves the portion it budgeted ⭐ ────")
-        emit("The beam search priced every candidate at .normal and the emitted plan")
-        emit("then served 0.4× tastes. At n=0 every item is recon, so a first round at")
-        emit("a new venue spent 40% of the budget it had been allocated.")
+        emit("──── the plan orders what it budgeted ⭐ ────")
+        emit("An order-based buffet serves printed plates. An untried dish is one order;")
+        emit("only a dish the ratings back may be ordered again, and every order is")
+        emit("priced at the plate the diner will actually be served.")
 
         let spread = DemoSpread.standard.map {
             DishSighting(name: $0.name, category: $0.category,
                          printedCategory: $0.printed, tierRank: $0.tier)
         }
+        func served(_ plan: RoundPlan) -> Double {
+            plan.items.reduce(0.0) {
+                $0 + ValueEngine.satietyCost(for: DishSighting(name: $1.dishName, category: $1.category),
+                                             portion: .normal) * Double($1.quantity)
+            }
+        }
 
-        // Every item unrated → every item a taste. Priced at .normal the search would
-        // admit one or two; priced at what it serves it packs the round.
+        // ① n = 0: nothing has earned a second order.
         let coldStart = RoundPlanner.plan(objective: .balanced, candidates: spread,
                                           events: [], capacity: CapacityState(maxSatiety: 9, spent: 0),
                                           exclusions: [])
-        let allTastes = coldStart.items.allSatisfy { $0.portion == .taste }
-        let served = coldStart.items.reduce(0.0) {
-            $0 + ValueEngine.satietyCost(for: DishSighting(name: $1.dishName, category: $1.category),
-                                         portion: $1.portion)
-        }
-        let agrees = abs(served - coldStart.totalSatietyCost) < 0.001
-        emit("cold start n=0: \(coldStart.items.count) items, \(String(format: "%.2f", coldStart.totalSatietyCost)) satiety")
-        emit("\(allTastes ? "✅" : "❌") every unrated item served as a taste")
-        emit("\(agrees ? "✅" : "❌") budgeted cost == served cost (\(String(format: "%.2f", served)))")
+        let oneEach = coldStart.items.allSatisfy { $0.quantity == 1 }
+        let agrees = abs(served(coldStart) - coldStart.totalSatietyCost) < 0.001
+        emit("cold start n=0: \(coldStart.items.map { "\($0.dishName) ×\($0.quantity)" })")
+        emit("\(oneEach ? "✅" : "❌") every untried dish is one order")
+        emit("\(agrees ? "✅" : "❌") budgeted cost == served cost (\(String(format: "%.2f", served(coldStart))))")
 
-        // A budget only one normal portion wide. Under the old accounting the search
-        // charged 0.9 per meat and stopped at one item; it serves 0.36.
+        // ② a dish rated good twice, under an objective that exploits.
+        let karubi = spread.first { $0.category == .meat }!
+        let rated = [TasteEvent(dishName: karubi.name, category: karubi.category, rating: .good, portion: .normal, roundIndex: 1),
+                     TasteEvent(dishName: karubi.name, category: karubi.category, rating: .good, portion: .normal, roundIndex: 1)]
+        let exploit = PlannerObjective(reconShare: .none, learnAbout: [], avoidProfile: nil,
+                                       posture: .conservative, rationale: "")
+        let backed = RoundPlanner.plan(objective: exploit, candidates: spread, events: rated,
+                                       capacity: CapacityState(maxSatiety: 9, spent: 1.8),
+                                       exclusions: [])
+        let repeats = (backed.items.first { $0.dishName == karubi.name }?.quantity ?? 0) > 1
+        let untriedOnce = backed.items.filter(\.isRecon).allSatisfy { $0.quantity == 1 }
+        let capped = backed.items.allSatisfy { $0.quantity <= RoundPlanner.maxOrdersPerDish }
+        emit("\(karubi.name) rated good ×2: \(backed.items.map { "\($0.dishName) ×\($0.quantity)" })")
+        emit("\(repeats ? "✅" : "❌") the backed dish is ordered more than once")
+        emit("\(untriedOnce ? "✅" : "❌") no untried dish is ordered twice")
+        emit("\(capped ? "✅" : "❌") no dish exceeds \(RoundPlanner.maxOrdersPerDish) orders")
+
+        // ③ a budget about one and a half plates of meat wide.
         let tight = RoundPlanner.plan(objective: .balanced, candidates: spread,
                                       events: [], capacity: CapacityState(maxSatiety: 1.5, spent: 0),
                                       exclusions: [])
-        let fits = tight.totalSatietyCost <= 1.5 + 0.001
-        let packs = tight.items.count > 1
+        let fits = tight.totalSatietyCost <= 1.5 + 0.001 && !tight.isEmpty
         emit("tight budget 1.5: \(tight.items.count) items, \(String(format: "%.2f", tight.totalSatietyCost)) satiety")
-        emit("\(fits ? "✅" : "❌") stays inside the budget")
-        emit("\(packs ? "✅" : "❌") packs more than one taste into a normal-portion budget")
+        emit("\(fits ? "✅" : "❌") plans something and stays inside the budget")
 
-        emit("the plan serves the portion it budgeted: \(allTastes && agrees && fits && packs ? "PASS" : "FAIL")")
+        let pass = oneEach && agrees && repeats && untriedOnce && capped && fits
+        emit("the plan orders what it budgeted: \(pass ? "PASS" : "FAIL")")
+        emit("")
+    }
+
+    /// Adjust re-runs SET_INTENT with the rejection as input. The guard is checked
+    /// deterministically; whether the model moves the right way on its own is a
+    /// measurement, printed and not scored, because the guard makes the outcome right
+    /// either way.
+    private func adjustMovesTheWayAsked() async {
+        emit("──── Adjust moves the objective the way the diner asked ────")
+
+        let rejected = RoundIntent(rationale: "Balanced default", reconShare: .quarter,
+                                   learnAbout: [], riskPosture: .balanced)
+        var guardHolds = true
+        for direction in [AdjustDirection.newThings, .moreLiked, .safer, nil] {
+            let stepped = AdjustGuard.fallback(from: rejected, direction: direction)
+            let moves = AdjustGuard.accepts(stepped, rejected: rejected, direction: direction)
+            let refusesSame = !AdjustGuard.accepts(rejected, rejected: rejected, direction: direction)
+            guardHolds = guardHolds && moves && refusesSame
+            emit("\(moves && refusesSame ? "✅" : "❌") \(direction?.label ?? "no reason"): unchanged refused · fallback → recon=\(stepped.reconShare.rawValue) posture=\(stepped.riskPosture.rawValue)")
+        }
+
+        let spread = DemoSpread.standard.map {
+            DishSighting(name: $0.name, category: $0.category,
+                         printedCategory: $0.printed, tierRank: $0.tier)
+        }
+        let input = AgentInput(sightings: spread, events: [],
+                               capacity: CapacityState(maxSatiety: 9, spent: 0),
+                               minutesRemaining: 80, exclusions: [], basisRecords: [],
+                               roundIndex: 1, currentHypothesis: nil)
+        var ownMoves = 0
+        var asked = 0
+        var allAccepted = true
+        if ModelAvailability.current().isReady {
+            for direction in AdjustDirection.allCases {
+                let trace = TraceLog()
+                let (_, adjusted) = await RoundAgent(trace: trace).adjust(input, hypothesis: nil,
+                                                                         rejected: rejected, direction: direction)
+                let guarded = trace.entries.contains { $0.title == "adjust guard" }
+                asked += 1
+                if !guarded { ownMoves += 1 }
+                allAccepted = allAccepted && AdjustGuard.accepts(adjusted, rejected: rejected, direction: direction)
+                emit("  \(direction.label) → recon=\(adjusted.reconShare.rawValue) posture=\(adjusted.riskPosture.rawValue)\(guarded ? "  (guard stepped in)" : "")")
+            }
+            emit("  the model moved the asked way on its own: \(ownMoves)/\(asked) — a measurement, not scored")
+        } else {
+            emit("  model unavailable — the model half is declared, not exercised")
+        }
+        emit("\(allAccepted ? "✅" : "❌") every adjusted objective moved the way it was asked")
+
+        // The checks above give each Adjust a fresh agent, and so a fresh clock. The app
+        // does not: its round clock started before the diner read the plan.
+        var reachesModel = true
+        if ModelAvailability.current().isReady {
+            var stale = LoopBudget(wallClockLimit: 1)
+            stale.beginRound()
+            let trace = TraceLog()
+            let agent = RoundAgent(trace: trace, budget: stale)
+            try? await Task.sleep(for: .seconds(1.5))
+            _ = await agent.adjust(input, hypothesis: nil, rejected: rejected, direction: .newThings)
+            reachesModel = !trace.entries.contains { $0.title == "loop budget" }
+            emit("\(reachesModel ? "✅" : "❌") Adjust after the round's clock ran out still asks the model")
+        }
+
+        let pass = guardHolds && allAccepted && reachesModel
+        emit("Adjust moves the objective the way the diner asked: \(pass ? "PASS" : "FAIL")")
+        emit("")
+    }
+
+    /// Capacity counts every plate; the value loop gets one opinion per dish per round.
+    private func oneRatingPerDishPerRound() {
+        emit("──── one rating per dish per round ────")
+
+        let scratch = KenyangStore(container: KenyangStore.makeContainer(inMemory: true))
+        let visit = scratch.startVisit(restaurantName: "Battery", pricePerHead: 250_000,
+                                       seatingLimitMinutes: 90, maxSatiety: 9)
+
+        // Rating twice replaces rather than adds.
+        scratch.setRating(.fine, dishName: "Karubi", category: .meat, in: visit, roundIndex: 1)
+        let replaced = scratch.setRating(.good, dishName: "Karubi", category: .meat, in: visit, roundIndex: 1)
+        let karubi = scratch.orders(of: "Karubi", in: visit, round: 1)
+        let once = karubi.count == 1 && karubi.first?.rating == .good && replaced
+        emit("\(once ? "✅" : "❌") rated fine then good → \(karubi.count) order, rated \(karubi.first?.rating.rawValue ?? "—")")
+
+        // Two plates logged, then rated: two orders for capacity, one opinion.
+        scratch.rate(dishName: "Harami", category: .meat, rating: nil, portion: .normal, in: visit, roundIndex: 1)
+        scratch.rate(dishName: "Harami", category: .meat, rating: nil, portion: .normal, in: visit, roundIndex: 1)
+        scratch.setRating(.good, dishName: "Harami", category: .meat, in: visit, roundIndex: 1)
+        let harami = scratch.orders(of: "Harami", in: visit, round: 1)
+        let split = harami.count == 2 && harami.filter(\.isRated).count == 1
+        emit("\(split ? "✅" : "❌") two plates then a rating → \(harami.count) orders, \(harami.filter(\.isRated).count) rated")
+
+        let pass = once && split
+        emit("one rating per dish per round: \(pass ? "PASS" : "FAIL")")
         emit("")
     }
 
@@ -725,6 +837,28 @@ final class VerificationRunner {
 
         let pass = shared && logged
         emit("a plan made in the app reaches the Island and the Action Button: \(pass ? "PASS" : "FAIL")")
+        emit("")
+    }
+
+    /// Stop in the Live Activity ends the visit in the store and never touches the view
+    /// model. Found on a phone: the app kept showing the meal after it was over.
+    private func stopFromActivityReachesTheApp() {
+        emit("──── Stop in the Live Activity reaches the app ────")
+
+        let scratch = KenyangStore(container: KenyangStore.makeContainer(inMemory: true))
+        let visit = scratch.startVisit(restaurantName: "Battery", pricePerHead: 250_000,
+                                       seatingLimitMinutes: 90, maxSatiety: 9)
+        let model = SessionViewModel(store: scratch)
+        let eating = model.phase == .eating
+        emit("\(eating ? "✅" : "❌") a live meal opens on the eating screen")
+
+        scratch.endVisit(visit, outcome: .stopped, ending: .unknown)
+        model.reconcileWithStore()
+        let idle = model.phase == .idle && model.visit == nil
+        emit("\(idle ? "✅" : "❌") after an outside Stop, the app returns to the start screen")
+
+        let pass = eating && idle
+        emit("Stop in the Live Activity reaches the app: \(pass ? "PASS" : "FAIL")")
         emit("")
     }
 

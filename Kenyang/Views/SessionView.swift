@@ -20,6 +20,7 @@ struct RootView: View {
 
 struct SessionView: View {
     @Bindable var model: SessionViewModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showingVerification = false
     /// `KenyangStore` is not observable, so a venue seeded from the Verify sheet never
     /// reached the start screen until relaunch. Closing the sheet rebuilds it.
@@ -53,6 +54,9 @@ struct SessionView: View {
             }
             .sheet(isPresented: $showingVerification, onDismiss: { storeRevision += 1 }) {
                 VerificationView(trace: model.trace)
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { model.reconcileWithStore() }
             }
         }
         // Blue Slate is the only fill the design allows, so no control may fall back to
@@ -92,10 +96,6 @@ struct StartView: View {
                                    spread: DemoSpread.standard)
             }
             .buttonStyle(.borderedProminent)
-
-            Button("Capture a menu") { showingCapture = true }
-                .font(.footnote)
-                .tint(Palette.accent)
 
             ForEach(laddered, id: \.name) { venue in
                 Button("Before you order at \(venue.name)") { tierVenue = venue }
@@ -300,28 +300,41 @@ struct EatingView: View {
 
     var body: some View {
         List {
-            Section("Capacity") {
-                ProgressView(value: model.capacity.fractionRemaining)
-                Text("About \(String(format: "%.1f", model.capacity.plateEstimate)) plates left")
-                    .font(.footnote).foregroundStyle(.secondary)
-                if let minutes = model.minutesRemaining {
-                    Text("\(minutes) minutes of seating left")
-                        .font(.footnote).foregroundStyle(.secondary)
+            Section {
+                // The icon's ring, counting down — never a bar filling toward a ceiling.
+                HStack(spacing: 24) {
+                    ZStack {
+                        CapacityRing(fraction: model.capacity.fractionRemaining, lineWidth: 22)
+                        VStack(spacing: 0) {
+                            Text(String(format: "%.1f", model.capacity.plateEstimate))
+                                .font(.title.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(Palette.ink)
+                            Text("plates left").font(.caption).foregroundStyle(Palette.muted)
+                        }
+                    }
+                    .frame(width: 130, height: 130)
+
+                    TimelineView(.everyMinute) { _ in
+                        VStack(alignment: .leading, spacing: 0) {
+                            if let minutes = model.minutesRemaining {
+                                Text("\(minutes)")
+                                    .font(.system(size: 44, weight: .semibold).monospacedDigit())
+                                    .foregroundStyle(Palette.ink)
+                                Text("min of seating left").font(.caption).foregroundStyle(Palette.muted)
+                            } else {
+                                Text("No time limit").font(.headline).foregroundStyle(Palette.muted)
+                            }
+                        }
+                    }
+                    Spacer(minLength: 0)
                 }
+                .padding(.vertical, 8)
             }
             Section("Rate what you ate") {
                 // `servedItems`, not `plan?.items` — the plan is replaced on every
                 // re-plan and this list must not lose a dish that was already served.
                 ForEach(model.servedItems) { item in
-                    HStack {
-                        Text(item.dishName)
-                        Spacer()
-                        ForEach(Rating.allCases, id: \.self) { rating in
-                            Button(rating.rawValue) { model.rate(item, rating: rating) }
-                                .buttonStyle(.bordered)
-                                .font(.caption)
-                        }
-                    }
+                    OrderRow(model: model, item: item)
                 }
             }
             Section {
@@ -329,6 +342,42 @@ struct EatingView: View {
                 Button("End the meal") { model.endSession() }
             }
         }
+    }
+}
+
+/// One dish: how many of its orders were eaten, and its one rating for the round.
+struct OrderRow: View {
+    let model: SessionViewModel
+    let item: PlannedItem
+
+    var body: some View {
+        let eaten = model.ordersEaten(item)
+        let current = model.rating(of: item)
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(item.dishName).foregroundStyle(Palette.ink)
+                Spacer()
+                Text("\(eaten) of \(item.quantity) eaten")
+                    .font(.caption.monospacedDigit()).foregroundStyle(Palette.muted)
+            }
+            HStack(spacing: 6) {
+                Button("Ate one", systemImage: "plus") { model.logOrder(item) }
+                    .buttonStyle(.bordered)
+                Spacer()
+                ForEach(Rating.allCases, id: \.self) { rating in
+                    if rating == current {
+                        Button(rating.rawValue) { model.rate(item, rating: rating) }
+                            .buttonStyle(.borderedProminent)
+                    } else {
+                        Button(rating.rawValue) { model.rate(item, rating: rating) }
+                            .buttonStyle(.bordered)
+                    }
+                }
+            }
+            .font(.caption)
+        }
+        .padding(.vertical, 2)
     }
 }
 

@@ -114,6 +114,75 @@ struct ConsistencyGuard {
     }
 }
 
+/// Why the diner pressed Adjust. A closed set, so nothing the diner types reaches a
+/// prompt (layer 2), and each answer names one axis of the objective it must move.
+enum AdjustDirection: String, CaseIterable, Sendable {
+    case newThings, moreLiked, safer
+
+    var label: String {
+        switch self {
+        case .newThings: "Try new things"
+        case .moreLiked: "More of what I liked"
+        case .safer:     "Play it safe"
+        }
+    }
+
+    var promptLine: String {
+        switch self {
+        case .newThings: "They want to try more dishes they have not had."
+        case .moreLiked: "They want more of the dishes they already rated well."
+        case .safer:     "They want fewer risky choices."
+        }
+    }
+}
+
+/// The model sets the adjusted objective; this checks it moved the way the diner asked.
+/// A threshold on the objective's own settings, not a judgement — the same standing as
+/// `ConsistencyGuard`. With no direction given it only has to differ.
+struct AdjustGuard {
+    static func accepts(_ new: RoundIntent, rejected: RoundIntent, direction: AdjustDirection?) -> Bool {
+        let recon = rank(new.reconShare) - rank(rejected.reconShare)
+        let posture = rank(new.riskPosture) - rank(rejected.riskPosture)
+        switch direction {
+        case .newThings: return recon > 0 || rejected.reconShare == .most
+        case .moreLiked: return recon < 0 || rejected.reconShare == .none
+        case .safer:     return posture < 0 || rejected.riskPosture == .conservative
+        case nil:        return recon != 0 || posture != 0
+        }
+    }
+
+    /// One step along the asked-for axis, when the model did not take it or was not
+    /// asked. Always satisfies `accepts`.
+    static func fallback(from rejected: RoundIntent, direction: AdjustDirection?) -> RoundIntent {
+        var intent = rejected
+        intent.learnAbout = []
+        switch direction {
+        case .newThings:
+            intent.reconShare = step(rejected.reconShare, by: 1)
+            intent.rationale = "Adjusted — more of this round spent on dishes you have not tried."
+        case .moreLiked:
+            intent.reconShare = step(rejected.reconShare, by: -1)
+            intent.rationale = "Adjusted — more of this round spent on dishes you rated well."
+        case .safer:
+            intent.riskPosture = step(rejected.riskPosture, by: -1)
+            intent.rationale = "Adjusted — safer choices this round."
+        case nil:
+            intent.reconShare = rank(rejected.reconShare) >= 2 ? .quarter : .most
+            intent.rationale = "Adjusted — a different balance of learning and enjoying."
+        }
+        return intent
+    }
+
+    private static func rank<T: CaseIterable & Equatable>(_ value: T) -> Int {
+        Array(T.allCases).firstIndex(of: value) ?? 0
+    }
+
+    private static func step<T: CaseIterable & Equatable>(_ value: T, by delta: Int) -> T {
+        let all = Array(T.allCases)
+        return all[max(0, min(all.count - 1, rank(value) + delta))]
+    }
+}
+
 enum StopReason: String, Sendable {
     case capacityExhausted
     case seatingTimeOver
@@ -208,6 +277,13 @@ struct LoopBudget {
     mutating func beginRound() {
         roundsUsed += 1
         callsThisRound = 0
+        roundStartedAt = .now
+    }
+
+    /// The clock bounds the agent's thinking, not the diner's reading. Adjust comes
+    /// after the diner has looked at the plan, so it restarts the clock; the call count
+    /// carries over, which is what still bounds a diner pressing Adjust repeatedly.
+    mutating func restartClock() {
         roundStartedAt = .now
     }
 
