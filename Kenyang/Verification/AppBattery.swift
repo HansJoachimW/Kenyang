@@ -43,6 +43,7 @@ final class VerificationRunner {
         stanceGuardMatchesLabels()
         untestableCategoryIsRefiled()
         actionButtonLogsInPlanOrder()
+        inAppPlanReachesSystemSurfaces()
         activityStateTracksTheMeal()
         capacityModelLearns()
         await proactiveStaysQuiet()
@@ -690,6 +691,40 @@ final class VerificationRunner {
         emit("⚠️ the HAPTIC is unverified — UIFeedbackGenerator needs a foreground scene,")
         emit("   and the Action Button runs this in the background. Dialog is the")
         emit("   guaranteed channel; the taps have never been felt on a device.")
+        emit("")
+    }
+
+    /// The check above sets `lastPlan` by hand, so it could not see that the app never
+    /// did. This one plans through `SessionViewModel` — the path a diner takes — and
+    /// asserts the consequence: the Action Button logs the head of the plan on screen.
+    private func inAppPlanReachesSystemSurfaces() {
+        emit("──── a plan made in the app reaches the Island and the Action Button ────")
+
+        let scratch = KenyangStore(container: KenyangStore.makeContainer(inMemory: true))
+        let visit = scratch.startVisit(restaurantName: "Battery", pricePerHead: 250_000,
+                                       seatingLimitMinutes: 90, maxSatiety: 9)
+        scratch.addSightings([
+            (name: "Karubi", category: .meat, printed: "MEAT", tier: 0),
+            (name: "Harami", category: .meat, printed: "MEAT", tier: 0),
+            (name: "Salmon Sashimi", category: .raw, printed: "SUSHI", tier: 0)
+        ], to: visit)
+
+        let model = SessionViewModel(store: scratch)
+        model.phase = .planning
+        model.skipToPriors()
+        guard let onScreen = model.plan?.items.map(\.dishName), let head = onScreen.first else {
+            emit("❌ the view model produced no plan — inconclusive"); emit(""); return
+        }
+
+        let shared = scratch.lastPlan?.items.map(\.dishName) == onScreen
+        emit("\(shared ? "✅" : "❌") store.lastPlan matches the plan on screen: \(onScreen)")
+
+        let reply = LogNextItemIntent.press(on: scratch)
+        let logged = visit.tasteEvents.map(\.dishName) == [head]
+        emit("\(logged ? "✅" : "❌") Action Button → \"\(reply)\" (expected to log \(head))")
+
+        let pass = shared && logged
+        emit("a plan made in the app reaches the Island and the Action Button: \(pass ? "PASS" : "FAIL")")
         emit("")
     }
 

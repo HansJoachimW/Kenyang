@@ -22,7 +22,12 @@ final class SessionViewModel {
 
     var phase: Phase = .idle
     var visit: Visit?
-    var plan: RoundPlan?
+    /// Written through to `store.lastPlan`, which is what the Island's Good/Skip, the
+    /// Action Button and the snippet read. Only the intents used to set it, so a round
+    /// planned in the app left every system surface answering "no round planned".
+    var plan: RoundPlan? {
+        didSet { store.lastPlan = plan }
+    }
     var hypothesis: ValueHypothesis?
     var intent: RoundIntent?
     var degradedMessage: String?

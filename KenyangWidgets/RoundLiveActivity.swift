@@ -16,8 +16,6 @@ struct RoundLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: RoundActivityAttributes.self) { context in
             LockScreenBar(attributes: context.attributes, state: context.state)
-                .activityBackgroundTint(Palette.surface)
-                .activitySystemActionForegroundColor(Palette.ink)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -102,7 +100,15 @@ private struct LockScreenBar: View {
     let attributes: RoundActivityAttributes
     let state: RoundActivityAttributes.ContentState
 
+    /// The system resolves `activityBackgroundTint` outside this view, so an adaptive
+    /// token there can land on light while the text lands on dark — light on light on
+    /// the bright Lock Screen. Both are resolved here, against the same environment.
+    @Environment(\.self) private var environment
+
     var body: some View {
+        let surface = Color(Palette.surface.resolve(in: environment))
+        let ink = Color(Palette.ink.resolve(in: environment))
+
         HStack(spacing: 14) {
             CapacityRing(fraction: state.fractionRemaining)
                 .frame(width: 44, height: 44)
@@ -138,6 +144,9 @@ private struct LockScreenBar: View {
             }
         }
         .padding(14)
+        .foregroundStyle(ink)
+        .activityBackgroundTint(surface)
+        .activitySystemActionForegroundColor(ink)
     }
 }
 
