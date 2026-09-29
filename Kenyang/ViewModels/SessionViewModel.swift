@@ -337,8 +337,10 @@ final class SessionViewModel {
     }
 
     /// One more plate of it eaten. Capacity only — the rating is separate (§3e).
+    /// Stops at what was ordered, like the Island and the Action Button: past that a
+    /// tap is a mis-tap, and there is no undo for a capacity reading.
     func logOrder(_ item: PlannedItem) {
-        guard let visit else { return }
+        guard let visit, ordersEaten(item) < item.quantity else { return }
         store.rate(dishName: item.dishName,
                    category: item.category,
                    rating: nil,

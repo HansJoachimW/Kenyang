@@ -694,7 +694,15 @@ final class VerificationRunner {
         let split = harami.count == 2 && harami.filter(\.isRated).count == 1
         emit("\(split ? "✅" : "❌") two plates then a rating → \(harami.count) orders, \(harami.filter(\.isRated).count) rated")
 
-        let pass = once && split
+        // "Ate one" stops at what was ordered — found by tapping it: 3 of 1 eaten.
+        let model = SessionViewModel(store: scratch)
+        let tuna = PlannedItem(dishName: "Tuna Nigiri", category: .raw, portion: .normal,
+                               isRecon: true, satietyCost: 0.5, quantity: 1)
+        for _ in 0..<3 { model.logOrder(tuna) }
+        let capped = model.ordersEaten(tuna) == 1
+        emit("\(capped ? "✅" : "❌") \"Ate one\" ×3 on a 1-order dish → \(model.ordersEaten(tuna)) of 1 eaten")
+
+        let pass = once && split && capped
         emit("one rating per dish per round: \(pass ? "PASS" : "FAIL")")
         emit("")
     }

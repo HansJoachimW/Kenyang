@@ -364,6 +364,7 @@ struct OrderRow: View {
             HStack(spacing: 6) {
                 Button("Ate one", systemImage: "plus") { model.logOrder(item) }
                     .buttonStyle(.bordered)
+                    .disabled(eaten >= item.quantity)
                 Spacer()
                 ForEach(Rating.allCases, id: \.self) { rating in
                     if rating == current {
