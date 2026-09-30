@@ -2,11 +2,101 @@
 
 **An agentic utility app for sequential decision-making under gastric constraint.**
 
-A buffet is explore–exploit under a knapsack constraint where observation costs budget. Kenyang treats it as one: an on-device agent forms a claim about where the value is concentrated, commits to an expected rating *before* tasting, plans a round against that objective, and revises when the diner's own ratings falsify it.
+> **Kenyang** *(adj., Indonesian)* — pleasantly full, satisfied. It names the goal state, which is also the app's ethical stance: **the target is kenyang, not maximum.**
 
-Scope is **order-based, grill-at-your-table all-you-can-eat** — you order from a fixed printed menu, staff bring the food, you cook it at the table.
+An all-you-can-eat meal is explore–exploit under a knapsack constraint where observation costs budget. Kenyang treats it as one: an on-device agent forms a claim about where the value is concentrated, commits to an expected rating *before* tasting, plans a round against that objective, and revises when the diner's own ratings falsify it. It tells you when to stop, and before you pay, it tells you which tier to buy.
 
-Everything runs on device — the agent, the menu parse and the capacity model. There are no network calls anywhere in the app.
+**Everything runs on device** — the agent, the planner and the capacity model. There are no network calls anywhere in the app.
+
+*Built for Challenge 3 of the Apple Developer Academy: an agentic utility app using Apple Intelligence, graded on seven criteria — Human-Centered AI, custom App Intents, Siri / Shortcuts / Spotlight, Foundation Models, tool calling, guardrails and agentic workflows.*
+
+**Contents:** The problem · The stance · How a meal works · Stack · Layout · Architecture · The tools · The guardrails · Where each criterion lives · Running it · What has been measured · Honest status · Agency level · Limitations
+
+---
+
+## The problem
+
+### The domain
+
+**Order-based, grill-at-your-table all-you-can-eat.** A fixed printed menu, ordered in rounds, brought by staff, cooked at the table, under a printed time limit and usually a tier price ladder. The venues are Surabaya's **Gyu-Kaku** (Japanese BBQ) and **Mashu** (Korean BBQ) and their near-identical competitors.
+
+**Not** self-serve buffets. The project started there and was narrowed on 2026-09-04 by measurement: reading dishes off photographed placard text scored **6/20 correct and 6/20 confidently wrong**, and the model's honest *"unknown"* collapsed from 7/20 to 1/20 — more confident as it got more wrong. An order-based venue prints everything that was uncertain:
+
+| Was uncertain (self-serve) | Is printed (order-based) |
+|---|---|
+| Dish identity, from a photographed placard | The menu, parsed **once per venue** |
+| Category, inferred by the model | The menu's own sections |
+| Portion size, ±30% | Standard — a plate of karubi is the same plate every time |
+| Value, proxied from how the house rations | A published **price ladder** |
+| Time | **90 minutes**, printed, last order at 75 |
+
+### Why it is a real decision problem
+
+This is not a joke framing. The structure is textbook:
+
+* **Finite capacity** — the knapsack.
+* **Unknown payoffs** — a dish's quality is unobservable until eaten.
+* **Observation costs capacity** — tasting to learn spends the very budget being optimised. In a standard bandit, pulling an arm is free; here it is not, which is what makes it interesting.
+* **A shrinking budget** — exploration must front-load and exploitation back-load.
+* **An adversarial house** — rice, noodles and soup are unlimited and cheap, the premium cuts that justify the tier cook slowest, and the clock is set so a badly sequenced meal runs out of time before it runs out of stomach.
+
+**Humans solve this badly and predictably**: over-explore in round one, fill up on filler, regret it by round three.
+
+**The reward is state-dependent.** Sensory-specific satiety (Rolls et al., 1981): repeated exposure to a flavour lowers its pleasantness relative to foods not yet eaten. The fourth plate of the same dish delivers a fraction of the first, and a different dish of lower objective quality can beat it. So the problem is **sequencing, not selection** — what to order *next*, given that every choice changes the value of every later one.
+
+### The decision before you pay
+
+A "break-even" goal — eat until the price is recovered — is the exact framing that makes people miserable at an all-you-can-eat table, and the app's stance forbids it. **Moved before the meal, it becomes the most useful thing the app does.** These venues print a ladder — Gyu-Kaku runs from Standard at Rp 248,800 to US Prime Karubi at Rp 629,800, a Rp 381,000 spread decided on every visit.
+
+*"Is this place worth it?"* is a question a regular has already answered. **"Which tier?"** recurs every visit, is financially material, and is answerable **only** from the diner's own history:
+
+```
+You have ordered Premium six times and finished more than two of the
+premium-only cuts on none of those visits. Standard, plus the karubi you
+actually eat, is 201,000 less. Go Standard.
+```
+
+It argues **down** the ladder, never up — recommending too high creates a sunk cost the diner will try to eat their way out of. Below three visits it refuses rather than guesses. Money is otherwise stated once, as a fact, at the stop.
+
+---
+
+## The stance
+
+* **Kenyang, not maximum.** The app makes a meal better, not bigger. Volume framing (*"eat as much as you can"*, *"get your money's worth"*) is forbidden by name and enforced in code — `OutputValidator` blocks it in anything the model writes.
+* **Stopping is a first-class output**, not a failure. When capacity or time runs out, the app says stop, and it uses the accent colour, never red.
+* **The invisibility constraint.** It is used at a table, with other people; any interaction over about three seconds ruins the meal it is meant to improve. That is why the Action Button, Siri and the Live Activity are the primary interface and the app's own screens are secondary.
+* **Neutral about the person, opinionated about the food.** No streaks, no scores, no praise for restraint.
+* **The avoid list is an input, never an inference.** It takes ingredients, never asks why, and never guesses an ingredient list — an unknown dish is held back and asked about.
+
+---
+
+## How a meal works
+
+```
+BEFORE YOU GO   arrival at a known venue, or a booking on today's calendar
+                → the tier argument runs unbidden, and usually stays silent
+START           "Still avoiding these?" — the avoid list, confirmed per meal
+ROUND           the agent HYPOTHESISES where the value is and commits to an
+                expected rating · SETS THE OBJECTIVE for the round · Swift PLANS
+                the orders under it: 1 order to learn an untried dish, up to 3
+                of a dish your ratings back
+                → Accept · Adjust (tell it which way) · Stop
+EAT             log plates (+ / −, Action Button, Siri, the Island) and rate
+                each dish once per round — rating again replaces it
+DECIDE          next round: the tools say whether the claim held → exploit or pivot
+STOP            capacity or seating time gone → the app says stop, then asks why
+```
+
+**Who owns which moment** — the app's own screens own only two of them:
+
+| Moment | Surface |
+|---|---|
+| Morning of, or arrival | **Proactive notification** — or, more often, silence |
+| Sitting down | **Control Center** control or the app |
+| Each round | **The app** (the plan), or the **Siri snippet**: Accept · Adjust · Stop |
+| Eating | **Dynamic Island** / **Lock Screen** Live Activity · **Action Button** · **Siri** |
+| At a glance | **Home-screen widget** · Spotlight for any dish |
+| The stop | **The app** — and the one question worth asking: why did the meal end? |
 
 ---
 
@@ -14,117 +104,57 @@ Everything runs on device — the agent, the menu parse and the capacity model. 
 
 | | |
 |---|---|
-| SwiftUI · SwiftData · FoundationModels · AppIntents | Swift 6.3 |
-| Xcode 27.0 · iOS SDK 27.0 · **deployment target 26.5** | Foundation Models context window: **4,096 tokens** |
+| SwiftUI · SwiftData · FoundationModels · AppIntents · ActivityKit · WidgetKit | Swift 6.3 |
+| Xcode 27.0 · iOS SDK 27.0 · **deployment target 26.5, both targets** | Foundation Models context window: **4,096 tokens** |
+| Development phone | iPhone 17 · **iOS 26.6.2** (2026-09-29) |
 
-`SWIFT_DEFAULT_ACTOR_ISOLATION` is set to `nonisolated`. The Xcode 26 template defaults to `MainActor`, which makes `AppEnum` and `AppEntity` conformances main-actor-isolated and therefore not `Sendable` — App Intents require the opposite.
+`SWIFT_DEFAULT_ACTOR_ISOLATION` is set to `nonisolated`. The Xcode template defaults to `MainActor`, which makes `AppEnum` and `AppEntity` conformances main-actor-isolated and therefore not `Sendable` — App Intents require the opposite.
 
-**The baseline is iOS 26.5; iOS 27 is taken when it is there.** The orchestration is hand-rolled, and every figure in this file was measured on the 26 baseline. iOS 27's agentic layer turns two of this app's *written* promises into framework behaviour, so both are taken behind `#available` and neither changes what the agent decides:
+**The baseline is iOS 26; iOS 27 is taken when it is there.** Two of the app's written promises become framework behaviour on 27, both behind `#available` in `AgentCapabilities`, the only place that branches — and the active tier is written into the trace:
 
-| | iOS 26.5 | iOS 27 |
+| | iOS 26 | iOS 27 |
 |---|---|---|
-| *"You must call the tools"* | an instruction, complied with 8/8 in a logged run | `ToolCallingMode.required` — the framework will not answer without one |
-| A failed generation | the wrecked turn stays in the transcript; the retry pays for it | `.revertTranscript` — the turn is rolled back and the retry starts clean |
-
-`AgentCapabilities` is the only place that branches, and the active tier is written into the trace — a guarantee an examiner cannot see is indistinguishable from one that is not there.
+| *"You must call the tools"* | an instruction, complied with 8/8 in a logged run | `ToolCallingMode.required` |
+| A failed generation | the wrecked turn stays in the transcript | `.revertTranscript` — rolled back, the retry starts clean |
 
 ---
 
 ## Layout
 
-*Generated from disk 2026-09-18.*
-
-**Two targets now.** `KenyangWidgets` renders the Live Activity and the widget family;
-`KenyangWidgets/Shared/` is a synchronized folder belonging to **both** targets, which
-is how the extension gets the capacity ring and the activity attributes without
-importing the model layer.
+**Two targets.** `KenyangWidgets` renders the Live Activity, the Island, the widget family and the Control Center control. `KenyangWidgets/Shared/` belongs to **both** targets — that is how the extension gets the ring, the tokens and the activity contract without importing the model layer.
 
 ```
 Kenyang/
 ├── Kenyang/                         the app target
-│   ├── App/
-│   │   └── KenyangApp.swift         @main, container, AppDependencyManager, launch arguments
-│   │
-│   ├── Models/       no behaviour beyond derivation
+│   ├── App/KenyangApp.swift         @main, container, AppDependencyManager, the Island's command handler, launch arguments
+│   ├── Models/                      no behaviour beyond derivation
 │   │   ├── Domain.swift             closed-set enums, FlavourProfile, CapacityState, MealEnding
-│   │   ├── KenyangStore.swift       the single data access point
+│   │   ├── KenyangStore.swift       the single data access point — orders, ratings, the shared plan
 │   │   ├── Persistence.swift        @Model entities + KenyangSchema
 │   │   └── SessionDefaults.swift    seed values for a meal, in one place
-│   │
-│   ├── Engine/       deterministic Swift — the model never computes
-│   │   ├── CapacityEngine.swift     satiety accounting, fullness prediction
-│   │   ├── RoundPlanner.swift       bounded beam search, and the reason under each dish
+│   ├── Engine/                      deterministic Swift — the model never computes
+│   │   ├── CapacityEngine.swift     satiety accounting, the capacity fit
+│   │   ├── RoundPlanner.swift       bounded beam search over orders, and the reason under each dish
 │   │   ├── TierEngine.swift         which tier to buy, argued from history — or refused
-│   │   └── ValueEngine.swift        posteriors, value density, satiety discount, break-even
-│   │
-│   ├── Agent/        the agentic layer
+│   │   └── ValueEngine.swift        posteriors, the verdict rule, satiety discount, break-even
+│   ├── Agent/
 │   │   ├── AgentCapabilities.swift  the one place iOS 27 is branched on
-│   │   ├── AgentProgress.swift      what the wait screen reads: stage, question, tool lines
-│   │   ├── AgentTypes.swift         @Generable contracts, TraceLog, GuardOverride
-│   │   └── RoundAgent.swift         the state machine, retries, error classification
-│   │
-│   ├── Activity/
-│   │   └── LiveActivityController.swift  start/update/end, and the pure state derivation
-│   │
-│   ├── Tools/
-│   │   └── AgentTools.swift         8 Tool conformances + ToolContext actor
-│   │
-│   ├── Guardrails/
-│   │   └── Guardrails.swift         the layers, each independently testable
-│   │
-│   ├── ViewModels/
-│   │   └── SessionViewModel.swift   @Observable, owns phase and session state
-│   │
-│   ├── Capture/      menu ingest
-│   │   ├── CaptureLog.swift         [CAPTURE] console trace
-│   │   ├── CaptureQualityGuard.swift  layer 0 — refuses an image it cannot read
-│   │   ├── MenuCaptureModel.swift   CapturedMenu + the capture view model
-│   │   ├── MenuDraft.swift          the editable row and the confirmed result
-│   │   ├── MenuParser.swift         @Generable ParsedMenu, 450-char chunks, greedy sampling
-│   │   ├── MenuTextExtractor.swift  PDF text layer → RecognizeDocumentsRequest → tiling
-│   │   └── SectionClassifier.swift  heading → category, heading-as-item filter
-│   │
-│   ├── Views/        one file per screen in the design record
-│   │   ├── DeclineView.swift        screen 8 — declineToOptimise, a first-class refusal
-│   │   ├── MenuCaptureView.swift    import → extract → parse → confirm
-│   │   ├── OnboardingView.swift     screen 1 — the stance, the avoid list, the capacity prior
-│   │   ├── Palette.swift            verdict and trace tints; the tokens live in Shared/
-│   │   ├── RoundPlanView.swift      screen 4 — the agentic core
-│   │   ├── SessionView.swift        Root, Session, Start, the wait, DemoSpread
-│   │   ├── StopView.swift           screen 6 — stop, and the one question worth asking
-│   │   ├── TierRecommendationView.swift  screen 2 — the verdict, or the refusal
-│   │   ├── TraceView.swift          screen 7 — the whole reasoning, guard overrides expanded
-│   │   └── VerificationView.swift   the harness menu — the only way to run on device
-│   │
-│   ├── Intents/      the system-experience surface
-│   │   ├── ActionButtonIntent.swift  B3 — one press, plan order, 8 s reassign window
-│   │   ├── Entities.swift           4 IndexedEntity types, EntityStringQuery, EntityPropertyQuery
-│   │   ├── KenyangIntents.swift     8 discoverable shortcuts + the SnippetIntent
-│   │   └── SpotlightIndexer.swift   indexAppEntities on launch and on session start
-│   │
-│   └── Verification/  measurement harnesses — launch-argument driven
-│       ├── AppBattery.swift         the 26 in-app checks
-│       ├── AuditFixtures.swift      mid-meal state, 95-item menu, seeded tier history
-│       ├── BranchBattery.swift      TB — 20 scenarios, does the move track the verdict?
-│       ├── CaptureProbe.swift       --capture-probe <file>, the capture path without UI
-│       ├── GrowthAudit.swift        per-call-site token/latency/transcript budgets
-│       ├── SchemaProbe.swift        schema, position and retry probes
-│       ├── StanceProbe.swift        input trust, grounding, volume framing
-│       └── TokenAudit.swift         the context audit via SystemLanguageModel.tokenCount
-│
-└── KenyangWidgets/                  the widget extension target
-    ├── CapacityWidget.swift         small · medium · circular · rectangular · inline
-    ├── KenyangWidgetsBundle.swift   @main WidgetBundle
-    ├── RoundLiveActivity.swift      the bar + all three Island presentations
-    └── Shared/                      in BOTH targets
-        ├── ActivityBridge.swift     LiveActivityIntent buttons, and how they reach the store
-        ├── CapacityRing.swift       the capacity glyph — icon, bar, widget, Island
-        ├── DesignTokens.swift       the six colours, light/dark
-        ├── MealSnapshot.swift       what the home-screen widget reads, via an App Group
-        └── RoundActivityAttributes.swift  ActivityKit contract, primitives only
+│   │   ├── AgentProgress.swift      what the wait screen reads
+│   │   ├── AgentTypes.swift         @Generable contracts, TraceLog
+│   │   └── RoundAgent.swift         the state machine, Adjust, retries, error classification
+│   ├── Activity/LiveActivityController.swift   start/update/end, and the pure state derivation
+│   ├── Tools/AgentTools.swift       8 Tool conformances + the ToolContext actor
+│   ├── Guardrails/Guardrails.swift  every layer, each independently testable
+│   ├── ViewModels/SessionViewModel.swift       @Observable, owns phase and session state
+│   ├── Capture/                     menu ingest — built, entry point hidden (see status)
+│   ├── Proactive/                   the arrival and morning-of trigger, and its silences
+│   ├── Views/                       one file per screen in the design record
+│   ├── Intents/                     App Intents, entities, Spotlight, the snippet, the Action Button
+│   └── Verification/                measurement harnesses — the battery and the model probes
+└── KenyangWidgets/                  the extension
+    ├── CapacityWidget.swift · RoundLiveActivity.swift · StartSessionControl.swift
+    └── Shared/                      in BOTH targets: ActivityBridge, CapacityRing, DesignTokens, MealSnapshot, RoundActivityAttributes
 ```
-
-**Code carries no comments by design.** This file is the explanation.
 
 ---
 
@@ -132,23 +162,25 @@ Kenyang/
 
 ### Store events, derive state
 
-`TasteEvent` is the source of truth. Capacity remaining, satiety state, value density, round number and break-even are **computed** from the event log, never persisted.
-
-The satiety model is still unvalidated. If derived values were stored, changing the model would be a data migration; because they are derived, it is a re-render.
+`TasteEvent` — **one plate eaten**, rated or not — is the source of truth. Capacity remaining, value, round number and break-even are **computed** from the event log, never persisted. The satiety model is still unvalidated; because values are derived, changing the model is a re-render, not a data migration.
 
 ### The model chooses the objective; Swift computes the optimum
 
-This resolves the tension between *the model never computes* and *if your code decides what happens next, the decision left the agent.* The seam is the objective function.
+This resolves the tension between *the model never computes* and *if your code decides what happens next, the decision left the agent.* The seam is the objective function:
 
 ```
 [FM] ValueHypothesis  →  where is the value, and what rating do I expect?
 [FM] RoundIntent      →  what is this round FOR?    ← the policy decision
-     RoundPlanner     →  beam search optimises THAT objective
+     RoundPlanner     →  beam search optimises THAT objective, order by order
 ```
 
-`PlannerObjective` parameterises the scoring function: recon share, what is worth learning, which flavour axis to avoid, how much variance to accept. Beam search finds the optimum; **it does not choose what is being optimised.**
+`PlannerObjective` parameterises the scoring: recon share, what is worth learning, which flavour to avoid, how much risk to accept. Beam search finds the best set of **orders**; **it does not choose what is being optimised.** A path may repeat a dish, and the satiety discount prices the repeat, so a second plate of the same thing scores below the first. An untried dish is one order; a dish the ratings back may get up to three; the round's capacity budget is the real limit.
 
 **Diagnostic:** replace the model's output with a constant. If the plan is unchanged, the agent is decorative.
+
+### Adjust re-runs the policy step, not the claim
+
+When the diner rejects a plan they say which way — *try new things · more of what I liked · play it safe*. Only `SET_INTENT` runs again, with the rejected objective and that direction as input. **The hypothesis is untouched**: a rejected plan is not evidence about where the value is — only ratings are. `AdjustGuard` checks the new objective actually moved the asked way and steps it itself if not. Adjust restarts the round's wall clock (it bounds the agent's thinking, not the diner's reading) but not its call count.
 
 ### The state machine
 
@@ -159,22 +191,35 @@ AVAILABILITY is the model there?                        → degraded mode
 HYPOTHESISE  compose a claim, commit expectedRating BEFORE tasting
 SET_INTENT   what is this round for
 PLAN         beam search under that objective
-OBSERVE      the diner rates what they ate
+OBSERVE      the diner logs plates and rates dishes
 DECIDE       exploit · pivot, given a verdict the model did not author
 ```
 
-Path length varies: a run can terminate at `TRIAGE`, at any `STOP CHECK`, or after 1–6 rounds.
+A run can end at `TRIAGE`, at any `STOP CHECK`, or after several rounds.
+
+### MVVM boundaries
+
+| Layer | Rule |
+|---|---|
+| **Model** | SwiftData entities and value types. No SwiftUI, no agent knowledge |
+| **Engine** | Pure functions over models. No I/O, no async, no model calls |
+| **Agent** | Owns the state machine and the `@Generable` contracts. Never touches SwiftData directly |
+| **ViewModel** | `@MainActor @Observable`. Translates user actions into store writes and agent runs |
+| **View** | Renders the phase. No business logic |
+| **Intents** | Resolve `KenyangStore` through `AppDependencyManager` — they run outside the app's UI |
+
+**Code carries no comments by design, except where a decision needs its reason next to it.** This file is the explanation.
 
 ---
 
 ## The tools
 
-Eight `Tool` conformances passed to `LanguageModelSession(tools:)`. `ToolContext` is an `actor` holding the deterministic state the tools read, and recording which were invoked — so *every listed tool is invoked in a logged run* is measurable rather than asserted.
+Eight `Tool` conformances passed to `LanguageModelSession(tools:)`. `ToolContext` is an actor holding the deterministic state the tools read, and it records which were invoked — so *every tool is invoked* is measured, not asserted.
 
 | Tool | Can refuse |
 |---|---|
 | `getSpread` | |
-| `getPosterior` | returns `insufficient` below minimum *n* |
+| `getPosterior` | `insufficient` below 2 ratings in the category |
 | **`evaluateHypothesis`** | **supported · contradicted · insufficient** |
 | **`checkCapacityModel`** | **consistent · over · under · insufficient** |
 | `getRemainingCapacity` | |
@@ -182,144 +227,88 @@ Eight `Tool` conformances passed to `LanguageModelSession(tools:)`. `ToolContext
 | `getConstraints` | |
 | `getVisitHistory` | |
 
-Three independent falsification axes: the **value** claim, the **budget** the plan is spent against, and **the agent's own reasoning history**.
+**Three independent falsification axes:** the value claim, the capacity the plan is spent against, and the agent's own reasoning history. *Insufficient* is the statistical guard working — one rating is an anecdote.
+
+**Each tool definition costs ~97 tokens — 774 for the eight — paid on every tool-carrying call.** Price a tool in tokens before adding one.
 
 ---
 
 ## The guardrails
 
-Each is a separate type, so each can be tested and demonstrated in isolation.
-
 | Layer | Type | Behaviour |
 |---|---|---|
-| 1 Availability | `ModelAvailability` | Distinguishes not-enabled, downloading and unsupported; each gets its own message and a real degraded path |
-| 2 Input trust | `RoundAgent.instructions` | Item names and menu section headings are declared untrusted data, and only ever enter prompts — never `Instructions` |
+| 1 Availability | `ModelAvailability` | Not enabled, downloading and unsupported each get their own message and a real degraded path |
+| 2 Input trust | `RoundAgent.instructions` | Menu text is declared untrusted data and only enters prompts. Adjust's direction is one of three fixed sentences — nothing the diner types reaches a prompt |
 | 3 Structural | `@Generable` enums | The model cannot invent a category or a basis |
-| 4 Grounding | `GroundingGuard`, `OutputValidator` | A claim naming a category not on tonight's menu is discarded; so is one that is too thin to read, or that carries volume framing |
+| 4 Grounding | `GroundingGuard`, `OutputValidator` | A claim about a category not on tonight's menu is discarded; so is one too thin to read, or one with volume framing |
 | 5 Statistical | `StatisticalGuard` | No claim below minimum *n* |
-| 6 Action | `ExclusionValidator`, `StopGuard`, `TriageGuard` | Ternary exclusion; forced stop; forced decline |
-| 7 Loop | `LoopBudget`, `AskBudget` | Max rounds, max calls per round, **a wall clock that is now enforced**, three questions per meal. Every refusal names its reason in the trace |
-| 8 Safety | `RoundAgent.retrying(_:)`, `describe(_:)` | One retry on transient generation failures; violations and locale errors surfaced as `.modelFailure`, never as a decision |
+| 6 Action | `ExclusionValidator`, `StopGuard`, `TriageGuard`, `ConsistencyGuard`, `AdjustGuard` | Ternary exclusion; forced stop; forced decline; the move overridden when it contradicts its own reason; the adjusted objective checked against the asked direction |
+| 7 Loop | `LoopBudget`, `AskBudget` | Max rounds, max calls per round, a 45 s wall clock, three questions per meal. Every refusal names its reason in the trace |
+| 8 Safety | `RoundAgent.retrying(_:)` | One retry on transient generation failures; failures surface as `modelFailure`, never as a decision |
 
-### Three of these exist because measurement demanded them
+**Several exist because measurement demanded them.** The model chose `stop` 0/3 and `decline` 0/2 times even when handed exhausted capacity — so stopping and declining are computed and forced. A prompt-injection test made the model argue for volume — so the claim is checked before display. The model writes *"the tools say the hypothesis is contradicted"* and then chooses `exploit` — so the move is overridden. **A guardrail overriding on a threshold is legitimate; Swift choosing the next action on a judgement would not be.**
 
-**`StopGuard` and `TriageGuard` force stopping and declining.** Across the day-3 spike the model chose `stop` 0/3 times and `decline` 0/2 times, even handed exhausted capacity. It recognises support well and contradiction moderately, but **it will not choose to end the meal.** So the app computes those deterministically and overrides. A guardrail overriding an agent is legitimate; Swift *choosing the next action* would not be — the distinction is that this fires on a threshold, not on a judgement.
+**The exclusion validator is ternary** — *safe · excluded · unknown*. A binary one fails open: *"I could not determine this"* becomes *safe*, the one unrecoverable direction. A dish stays held back until the printed name, a known ingredient list or **the diner, after asking staff**, settles every term. The question goes to the diner, never to the model.
 
-**`OutputValidator` exists because instructions alone did not hold.** A prompt-injection test compromised the app's core stance — *"eat as much as possible to get your money's worth"* — which the app's stance forbids by name. Instruction hardening is necessary and insufficient; the claim is now checked before display.
+---
 
-**A substring blacklist has to list inflections, and its test cannot be the blacklist.** It held `"stuff yourself"` and the model wrote `"stuffed"`; `money’s worth` with a curly apostrophe matched nothing at all. Both are closed *(2026-09-28)*, and coverage is now measured in the battery against **a hand-labelled corpus the guard never sees** — the one oracle that is not the guard grading itself. The list is still a list: an answer the probe cannot label is printed for a human read and promoted into the corpus, which is how *"high in calories … the most enjoyment for your money"* was caught the same day.
+## Where each criterion lives
 
-**`GroundingGuard` exists because `@Generable` cannot reach the claim.** `category` is
-constrained to the enum and cannot be invented; `claim` is free text, and the model will
-write *"the soup station"* at a venue with no soup. Injection testing returned exactly
-that, alongside one-word claims like *"Grill"* and *"Unknown"*. Shape-valid and
-ungrounded is a state only the app can catch — **guided generation constrains shape, not
-meaning.**
+| # | Criterion | Location |
+|---|---|---|
+| 1 | Human-Centered AI | `TraceLog` and the trace screen (computed vs model), `VerdictBadge` (colour never alone), the guardrails |
+| 2 | Custom App Intents | `Intents/` — table-side intents run with `openAppWhenRun = false`; Live Activity intents; the snippet |
+| 3 | Siri / Shortcuts / Spotlight | `Intents/Entities.swift` (four `IndexedEntity` types), `KenyangShortcuts`, `SpotlightIndexer` |
+| 4 | Foundation Models | `Agent/` |
+| 5 | Tool calling | `Tools/AgentTools.swift` |
+| 6 | Guardrails | `Guardrails/Guardrails.swift` |
+| 7 | Agentic workflows | `Agent/RoundAgent.swift`, `Proactive/` |
 
-*(The first version of this guard matched `MenuCategory.label` as a whole string —
-`"Soup & broth"` — which a model would never write verbatim, so it could never have
-fired. It compares words now. A guard that cannot fire is worse than no guard, because
-it reads as coverage.)*
-
-**`ConsistencyGuard` catches the model contradicting itself.** Observed repeatedly: the reasoning field correctly says *"the tools say the hypothesis is contradicted"* and the move field then says `exploit`. When the stated reason disagrees with the chosen move, the move is overridden.
-
-### The exclusion validator is ternary
-
-```
-safe      every exclusion term resolved, none hit  → plannable
-excluded  a term hit, by name or by ingredient     → discarded before display
-unknown   one or more terms still unresolved       → never planned silently
-```
-
-A binary validator fails open: *"I could not determine this"* silently becomes *safe*, which is the one direction that is unrecoverable.
-
-**The verdict is reached per term, and the strictest wins.** A term is settled three ways: the printed name settles it — *Prawn Tempura* against an exclusion of *prawn* needs no ingredient list — a known ingredient list settles it, or **the diner settles it after asking staff**. One unresolved term is enough to hold the whole dish back.
-
-Answers are stored per term rather than as one `isSafe` flag, because clearing *peanut* says nothing about *shellfish*: **adding an exclusion re-opens every dish already cleared against the old list.** That is the case a boolean fails open on.
-
-The question goes to the diner, never to the model. Asking a language model whether *Nasi Goreng* contains peanuts is the confident-and-wrong failure that forced the scope narrowing on 2026-09-04, and it would be wrong in the one direction that puts someone in hospital. Held-back dishes appear in the round plan with a yes/no per open term, and answering re-plans immediately. There is deliberately **no voice intent for this** — it briefly existed and was cut, because an app for buffet optimising should not advertise ingredient checking as a capability in Shortcuts.
-
-The exclusion list is **an input, never an inference** — the app takes ingredients and never asks why an item is on the list.
+**The rule that decides whether an intent scores:** one that only opens the app is a launcher. Every table-side intent does the work and answers with the app closed.
 
 ---
 
 ## Running it
 
-Open `Kenyang.xcodeproj` and run. Requires a device or simulator with Apple Intelligence available; the app has a real degraded path when it is not.
+Open `Kenyang.xcodeproj` and run the **Kenyang** scheme. **To run on the phone, pick it by its device name under *iOS Device*** — the Simulator is also called "iPhone 17". Apple Intelligence must be available for the agent; without it the app plans from priors and says so.
 
-**In-app:** the **Verify** toolbar button runs the battery and shows results on device.
+**In-app:** the **Verify** toolbar button runs the battery and every harness, and prints to the Xcode console. On a phone this is the only way.
 
-**Headless.** Every harness prints to the console and exits:
+**Headless, Simulator only:**
 
 ```bash
 xcrun simctl launch --console-pty <device> com.hansjoachim.Kenyang --run-all
 ```
 
-App battery → context audit → stance probe → growth audit → schema/position/retry probes → branch battery. Roughly 14 minutes on iPhone 17 / iOS 26.5. Individually: `--verify` `--token-audit` `--stance-probe` `--growth-audit` `--schema-probe` `--position-probe` `--retry-probe` `--branch-battery`.
+App battery → context audit → stance probe → growth audit → schema/position/retry probes → branch battery. Individually: `--verify` `--token-audit` `--stance-probe` `--growth-audit` `--schema-probe` `--position-probe` `--retry-probe` `--branch-battery`.
 
-**Three states are reachable from the Verify menu rather than by playing through to
-them:** *Seed tier history — 2 visits* gives screen 2's refusal, *— 6 visits* gives its
-argument, and *Seed a guard override* puts screen 7B's consistency-guard row into the
-live trace. Each is a labelled fixture, not a code path the app takes on its own.
+**The first launch after a reinstall sometimes stalls before printing anything.** Relaunch.
 
-**These are measurement, not tests.** There is no test target and they produce numbers rather than assertions.
+**These are measurement, not tests** — there is no test target. The Verify menu also seeds fixtures: two or six visits of tier history (screen 2's refusal and its argument) and a guard override for the trace.
 
 ---
 
-## What has actually been measured
+## What has been measured
 
-Dates matter here; every figure below is from a logged run, not an estimate.
+Every figure is from a logged run.
 
 | | |
 |---|---|
+| App battery, Simulator, 2026-09-29 | **30 checks, 30 passed.** One check that needs a live model call reports **SKIPPED** instead of failing when a decode flakes |
 | Tool calling | **8/8 tools invoked** by the model, unprompted |
 | Falsification tools returning a negative | **3/3** |
-| Guardrail layers shown firing | **4** — availability, structural, statistical, exclusion |
-| A hypothesis dying, then pivoting | ✅ `rawBar → grill` |
-| Path variance | 3 distinct terminals over 4 runs |
-| Cold start at n = 0 | ✅ |
-| Context, worst call site | **49% of the 4,096 window** against a 3,000 pass bar |
-| `RoundDecision` guided-generation decode | 72–86% first attempt → **0–8% effective** after retry |
+| A hypothesis dying, then pivoting | ✅ |
+| Context, worst call site | **49% of the 4,096 window** |
+| `RoundDecision` decode | ~20% fail first attempt → **5–13% effective** after one retry |
 | Round latency, physical iPhone 17 | **~8.4 s** first round, **~3.4 s** after |
-| Menu parse, 95 items | **95/95 in one call** (19.1 s); chunked 95/95, nothing invented |
-| App battery, iOS 26.5 Simulator, 2026-09-28 | **26/26** |
-| **Branch selection, 20 scenarios × 3 runs** | **discrimination −5%** — the move does not track the verdict |
+| Menu parse, 95 items | **95/95**, nothing invented |
+| Branch selection, 20 scenarios × 3 runs | **discrimination −5%** — the move does not track the verdict (below) |
+| Adjust, the model following the diner's direction on its own | **2 of 6** over two runs — the guard steps in otherwise. Far too few to rank anything |
+| Layer 6 against a hand-labelled corpus it never sees | old blacklist **6 leaks**, current **0** |
 
-**On iOS 27 the app runs and the tier reports correctly, but the model does not.** The
-27.0 Simulator runtime has no Apple Intelligence assets — `UnifiedAssetFramework Code=5000` — so
-every model call fails there and the model-dependent checks are **declared and
-unexercised**, not passed. The battery now says so in those words rather than recording
-it as the app failing to call its tools, because `availability == .available` and *the
-call works* turned out to be different claims.
+**The Simulator is not the device.** It ran ~3× slower in early September and faster later; latency comes from the phone only. The iOS 27 Simulator has **no Apple Intelligence assets**, so every model-dependent check there is declared and unexercised.
 
-All figures are from a physical iPhone 17 running iOS 26.5 unless stated. Earlier runs used the Simulator, which turned out to be **~3× slower** than the device — see below.
-
-### Context is not the constraint — on either side
-
-Every figure comes from `SystemLanguageModel.tokenCount(for:)`, not a `characters / 4` estimate.
-
-Two consequences that shape the codebase:
-
-1. **Tool definitions cost ~97 tokens each — 774 for the current eight.** That is the largest single line item in the window, paid on every tool-carrying call. Price a tool in tokens before adding it.
-2. **Tool results are cheap** — 11–28 tokens each. The preamble is 86% of a `decide` transcript. The constant dominates, not accumulation.
-
-### The output side, and a guide that compiles but does not work
-
-`setIntent` once threw `.exceededContextWindowSize` **from a 539-token start**. `RoundIntent.rationale` is a free `String`, so the model generated until the window ended and killed the session — not an input problem.
-
-The obvious fix is the wrong one. `GenerationGuide<String>` offers exactly three members — `.constant`, `.anyOf`, `.pattern` — so a bounded regex looks like the only structural cap. **It compiles, and the device rejects it at runtime** with `unsupportedGuide`, breaking *every* model call: measured at 0/12 on the patterned type while two unpatterned types in the same process scored 9/12 and 8/12.
-
-Output is instead bounded by **`GenerationOptions(maximumResponseTokens:)`**, per call site. The general lesson: *a guide that type-checks is not a guide the model honours*, and only a run on real hardware tells you which is which.
-
-### `RoundDecision` fails guided generation, and why the fix is a retry
-
-The model emits correct reasoning as prose instead of JSON. One candidate cause was rejected — failure does not accumulate with session state (flat across four runs, most recently 75 → 75 → 83%). The other, that the `@Guide` wording invites prose, **turned out to be untestable at the available n**: across four runs of twelve calls each, every variant has been both best and worst, and within-variant spread is as wide as between-variant spread. So the fix is `retrying(_:)`, one retry on a transient failure, consuming loop budget so it cannot run away.
-
-It mattered more than the rate suggested: `decide()` caught the error and returned the **unchanged hypothesis**, so one decision step in five silently became *"carry on"* — indistinguishable from `exploit`. A decode failure now degrades to the deterministic tool verdict instead, attributed in the trace as taken on the tool's authority alone, and recorded as `TraceKind.modelFailure` rather than `.guardrail`. **A guardrail firing is the system working; a decode failure is not, and the trace must not conflate them.**
-
-**The theory behind the fix was still partly wrong.** The swallow was *not* what produced the exploit bias — with it gone, `exploit` is still ~92% (65/71). The guards stay load-bearing.
-
-An incidental finding worth keeping: three failures began `DecisionB{"because": …` — **the `@Generable` type's own name leaked into the generated text** and broke the JSON. Prefer type names that read like domain nouns.
+**Context is not the constraint.** Tool definitions are the largest line item; tool results cost 11–28 tokens each. Output is bounded per call site by `GenerationOptions(maximumResponseTokens:)` — **not** by a `.pattern` guide, which compiles and is rejected by the device at runtime, killing every call.
 
 ---
 
@@ -327,343 +316,58 @@ An incidental finding worth keeping: three failures began `DecisionB{"because": 
 
 ### Working
 
-Session start · menu capture from a published file, confirmed before anything is written ·
-tool-calling agent · hypothesis with a pre-registered expectation · round objective ·
-beam-search planning · rating · capacity accounting that **learns from the diner's own
-fullness report** · **eight discoverable App Intents**, four `IndexedEntity` types indexed
-into Spotlight, an interactive snippet that rewrites itself in place, an Action Button
-intent, a Live Activity with all three Dynamic Island presentations, a Control Center
-control, a Dining focus filter, and an arrival trigger that usually says nothing.
+A meal end to end: the avoid-list check, the agent's hypothesis with a pre-registered expectation, the round objective, beam-search planning in **orders**, Adjust through the agent, plate logging with **+ / −**, one rating per dish per round, capacity accounting that learns from the diner's fullness report, the stop and its question. The trace with computed-versus-model attribution. Eight App Intents, four `IndexedEntity` types indexed into Spotlight, an interactive snippet, an Action Button intent, a Live Activity and all three Island presentations, a home-screen widget, a Control Center control, a Dining focus filter, and an arrival trigger that usually says nothing.
 
-### The trigger that usually says nothing
+### Seen on hardware — 2026-09-29
 
-The highest-value moment in the app is not at the table. It is **before you pay** — a tier
-suggestion delivered after you have ordered is worthless. So arrival at a venue you have
-eaten at, or a booking on your calendar this morning, runs the tier argument unbidden:
+The **Live Activity on the phone**: it starts, updates, and **its Stop ends the meal** — which is how the *app kept showing a finished meal* bug was found. The ring and the timer on the eating screen.
 
-```
-region crossing  ·  morning calendar scan
-        ↓
-TierEngine.verdict — is there anything earned to say?
-        ↓
- ├─ one menu, no ladder      → SILENCE
- ├─ fewer than three visits  → SILENCE
- ├─ the tier you already buy → SILENCE
- └─ a rung you are not eating → one line, before you order
-```
+### Built, not yet exercised on a phone
 
-**Three of the four branches produce nothing, and that is the feature.** An agent that
-notifies on every trigger is a scheduler; one that runs, concludes it has nothing earned
-to say, and stays quiet has made a decision. Each silence records *which* one it was —
-a silence nobody can account for is indistinguishable from a trigger that failed.
+**Siri by voice with the app closed · Spotlight returning a dish · the snippet redrawing in place · the Island's Good / Skip · the Action Button and its haptic · the widget on a real home screen · the Control Center tile · the Dining focus row · a real arrival or calendar trigger.** Several were checked in the Simulator (the Island, the widget); none of these substitutes for the phone.
 
-The line itself is a template, not model-phrased, and that is deliberate — see defect 7.
+### Open defects
 
-**The design record is built.** Nine screens, against `Designs/C3 Design V1.2.pdf`:
+The ones that change behaviour:
 
-| | Screen | What it carries |
-|---|---|---|
-| 1 | Onboarding | The stance, the avoid list, the capacity prior. The only place the avoid list can be authored |
-| 2 | Tier recommendation | The verdict, four `COMPUTED` evidence rows naming their tool — or a refusal in the same layout below three visits |
-| 4 | Round plan | Hypothesis, pre-registered expectation, recon/exploit, a reason under every dish, held-back dishes in amber |
-| — | The wait | Named stages, each with its question and measured ceiling, tool lines as they return, and an escape on every stage |
-| 6 | Stop | Accent not red. The threshold beside the reading, and the one question worth asking |
-| 7 | Trace | The whole reasoning, computed-vs-model |
-| 7B | Guard override, expanded | What the model wrote · what it chose, struck through · what the guard did |
-| 8 | Refusal | `declineToOptimise` with the same weight as a plan. Nothing greyed, nothing apologising |
-| — | Stress test | Three degenerate claims, three treatments |
+1. **The Lock Screen bar can render light-on-light** on the bright Lock Screen. The fix committed on 2026-09-28 does not work — iOS draws its own background there. Check on the phone before the next attempt.
+2. **Two notions of "the current round".** The store derives it from what has been logged; the app counts it. Right after *Plan the next round*, an Island or Action Button log lands in the previous round.
+3. **"Rate what you ate" is in memory only** — relaunching mid-meal empties it.
+4. **`KenyangStore` is not observable.** Worked around where it showed (the start screen, the foreground after an outside Stop); any new screen reading the store directly inherits it.
+5. **Meals started from Control Center or Siri skip the avoid-list check.**
 
-### Built but never exercised on device
+**Deliberately not built:** grill constraints (slots, cook time, plain before marinated) · a thermal budget · OCR · the per-category satiety density (built, silenced pending a real-meal measurement) · a model-phrased tier notification (template, pending a background-model measurement). Menu capture is built and its entry point is hidden.
 
-This is the distinction that matters, and it is the one an examiner probes. Everything
-above is measured **in the app battery**, 26 checks, and **every screenshot in this
-repository is from the Simulator.** None of the following has been run by voice, by
-search, or with the app closed:
-
-* Siri resolving a spoken dish name — the risky one, and the same *confident-and-wrong*
-  failure shape that forced the scope narrowing on 2026-09-04
-* The registered phrases working with the app closed
-* Spotlight returning a dish rather than the app
-* The snippet redrawing in place rather than dismissing when Accept is tapped
-* **The Action Button's haptics.** `UIFeedbackGenerator` needs a foreground scene and the
-  intent runs in the background, so the ×1/×2 distinction is expected to no-op. The
-  dialog is the channel that works; the taps have never been felt
-* **The Live Activity and the Island rendering.** The state machine behind them passes
-  9/9 checks; the drawing has never been seen on hardware
-* **The home-screen widget with real data.** The App Group is wired on both targets now
-  and `MealSnapshotStore.isConfigured` reports `resolved` in the battery — so the widget
-  has real numbers to read. Nobody has put it on a home screen and looked
-* **The Control Center control.** `StartSessionControlIntent` is a `LiveActivityIntent`,
-  so it starts the meal in the app's process with the app closed — asserted in the
-  battery, but the tile has never been added to Control Center or a Lock Screen
-* **The Dining focus filter.** The venue it pins is read by every session started from a
-  system surface; the Focus row in Settings has never been opened
-* **The arrival and morning-of triggers.** The decision they gate is asserted four ways
-  in the battery and **three of the four produce nothing**. What has never happened is a
-  real region crossing, a real calendar scan, or a notification landing on a lock screen
-
-### The Simulator is faster than the design assumed, and that matters
-
-The design's wait screen was drawn against **11–36 s per round**, which was the
-Simulator running ~3× slow before the first device run. On a warm model a whole round now
-completes in about **two seconds** in the Simulator — fast enough that catching the wait
-screen for a screenshot needs a capture loop running before the tap. The staged wait is
-still right for the cold first round and for the retry path, and it is no longer the
-typical case.
-
-### Known defects, ranked
-
-0. ~~**The stance filter has a hole, and the test that covers it is a tautology**~~ →
-   **CLOSED 2026-09-28.** See below.
-1. ~~**The hypothesis category survives as `.unknown`**~~ → **CLOSED 2026-09-28.** See
-   below.
-2. **The parse cannot report "there is nothing here."** Handed a contents page, the model
-   fabricated ten items from headings. A deterministic guard now refuses such an image
-   before the model sees it, but the underlying behaviour stands.
-2. **`RoundDecision` decode failure** — ~20% on the first attempt. The retry clears it to
-   **5–13% effective** across three device runs, and the residual degrades to the tool
-   verdict rather than vanishing. On iOS 27 the failed turn is now reverted rather than
-   left in the transcript, which makes the retry cheaper but does not make it rarer.
-3. ~~**`CapacityEngine.fittedMax` fits on censored data**~~ → **CLOSED 2026-09-19.** See
-   below. The fit reads `endedBecause` now, and layer 1 turned out to be dead code
-   besides.
-4. **`hypothesise` is close to its ceilings** — 2,023 of 2,200 tokens and 33 of 36
-   transcript entries, 92% of both, at ~7 s on device. This is why the round does *not*
-   thread a transcript between steps, although 26.5 would allow it: the tightest call
-   site is the last one that should be asked to carry history.
-5. **A cold-start round is capped by `maxItems`, not by capacity.** With portion costing
-   fixed, four tastes come to ~1.1 of a ~3.6 satiety budget. The accounting is now
-   honest; whether a round should serve more than four dishes is an open product
-   question, not a bug.
-6. **The Live Activity, the Island, the widget, the control and the Focus row are built
-   and unseen.** The `KenyangWidgets` target exists, the state derivation passes 9/9
-   checks and the App Group now resolves; **none of the six surfaces has been rendered on
-   hardware.** Building B9 made this list longer, not shorter.
-7. ~~No Control Center control, Focus filter or background task.~~ → **all three landed
-   2026-09-19** (B9, then B8). What remains is that the tier notification's line is a
-   template rather than model-phrased, because T58 — does `SystemLanguageModel` answer
-   inside a `BGTask`? — has not been measured. That is a deliberate fallback, not an
-   omission: a notification that failed to fire because an unmeasured background model
-   call hung would be worse than one that reads plainly, and the trigger gets one shot at
-   the moment that matters.
-8. Grill constraints — slots, cook time, plain-before-marinated — are designed, not
-   implemented in `RoundPlanner`.
-9. **`KenyangStore` is not `@Observable`.** ~~The tier entry point on the start screen
-   does not refresh until relaunch~~ → **worked around 2026-09-28**: closing the Verify
-   sheet rebuilds the start screen, verified in the Simulator by seeding six visits. The
-   store itself is still not observable, so any new screen that reads it directly
-   inherits the problem.
-10. **"Run every harness" also runs the seed rows**, so a full in-app run clears and
-    re-seeds the tier history. Its footer still says *seven* harnesses.
-11. **The first launch after a reinstall stalled once** before any harness printed — the
-    app idle at 0.5 s CPU, most likely inside the Spotlight re-index that runs first. A
-    plain relaunch cleared it. Seen once, in the Simulator, not investigated.
-
-**Closed since the first draft:** unbounded output *(capped by `maximumResponseTokens`)*;
-latency *(the Simulator was pessimistic by ~3×; a round is ~8.4 s then ~3.4 s on device)*;
-menu-parse fidelity *(now 95/95 through the shipping parser, measured, nothing invented)*;
-capture persistence *(a confirmed menu starts a session)*; the volume-framing false
-positive *(the test was wrong, not the guard — **and in 2026-09-28 the same test turned
-out to be wrong in the other direction too, see defect 0**)*.
-
-**Closed 2026-09-28 — layer 6's hole, the test that could not see it, and a
-falsification loop that switched itself off.** Each has a battery check that fails
-against the old code:
-
-* **The stance filter missed inflections.** Invited to optimise for volume, the model
-  answered *"Yes. You should keep eating until you are stuffed."* The blacklist held
-  `"stuff yourself"`, not `"stuffed"`, so **that claim would have reached the screen**; a
-  curly apostrophe got `money’s worth` past it too. The list now carries the inflections
-  and normalises `’`. `stanceGuardMatchesLabels` asserts it against 13 hand-labelled
-  sentences: **the old list leaks 6, the new one 0**, with no new false positive —
-  *"the gorgeous wagyu"* still passes.
-* **The stance probe was the guard grading itself — twice.** Volume framing scored *on
-  stance* as `isSafe(answer)`, and input trust counted `leaked` on text `sanitised` had
-  already cleaned, so it was **0 by construction**. Passing the guard now proves nothing:
-  an answer is on stance only if it rejects the premise, and anything else is printed in
-  full and scored **INCONCLUSIVE** until a human labels it. Its first run did exactly
-  that — *"items that are high in calories … the most enjoyment for your money"*, which
-  the old probe would have marked ✅. It is in the corpus now, and blocked.
-* **The hypothesis category survived as `.unknown`.** The correction sat inside the
-  rejection branch, so a claim that passed every guard kept it and `evaluateHypothesis`
-  answered `insufficient` for the whole meal. It now runs on every hypothesis, before the
-  rejection, and also re-files a category **with nothing on tonight's menu** — the same
-  failure in a different shape. It prefers the category the claim's own words name, so
-  the headline and the category agree, and it leaves an `untestable category` row in the
-  trace. `untestableCategoryIsRefiled` covers it.
-
-**Also closed 2026-09-28 — both found by using the app, neither on any list.** The
-battery was green through both, which is the point:
-
-* **Answering an ingredient question re-ran the whole agent.** *"Does it contain
-  peanuts?"* cost a `hypothesise` call on round 1 and went through `decide` — **which can
-  pivot** — on later rounds, so the agent could abandon its hypothesis because the diner
-  answered a question about nuts. It also threw the screen back to the wait and spent a
-  round of `LoopBudget` per answer. Nothing a diner says about an ingredient is evidence
-  about where the value is: only the beam search re-runs now, under the objective the
-  agent already chose.
-* **"Rate what you ate" was bound to the current plan.** It was never what you ate — it
-  was what was currently proposed, so every re-plan replaced it and dishes already served
-  became unrateable, losing their value observation. It now reads an accumulated
-  `servedItems` that only a new round clears.
-
-**Closed 2026-09-17.** Each one had a check written the same day, and each check fails
-against the old code:
-
-* **The exclusion guard emptied every plan.** `ingredientsKnown` was never set outside
-  test fixtures, so one exclusion resolved every dish to `unknown` and the agent
-  returned nothing, silently. Three things were wrong: the name was not consulted before
-  the ingredient list, there was no way for the diner to answer, and the planner dropped
-  `unknown` dishes instead of surfacing them. All three now hold.
-* **The planner budgeted one portion and served another.** The beam search priced every
-  candidate at `.normal` and the plan served 0.4× tastes. Recon is now a property of the
-  dish — unrated, or named in the model's `learnAbout` — so the search prices what it
-  serves.
-* **Budget exhaustion was invisible.** Every model call now routes through one place
-  that records the refusal and its reason. `wallClockLimit`, declared and never read, is
-  enforced.
-* **The snippet's Stop button was broken** — it ran `EndMealIntent` with its required
-  `reason` unset. Stop is now a two-step rewrite in place: tap Stop, get the reason
-  chooser, each button carrying its own `MealEnding`.
-* **Two App Shortcuts registered the same phrase.** "Log a dish in Kenyang" sat on both
-  `RateDishIntent` and `LogEatenIntent`; phrases are a global namespace and one of them
-  silently lost.
-* **`PlanRoundIntent` never passed the fullness readings**, so `checkCapacityModel`
-  answered `insufficient` every time it was asked from Siri — the falsification tool the
-  capacity story rests on could not fire on the one path with no screen to fall back to.
-
-**Closed 2026-09-18, and all four were found by looking at a screen rather than at a
-test.** The battery was green through every one of them.
-
-* **The wall clock was starving the objective.** Enforcing `wallClockLimit` — dead code
-  until this week — revealed that its 20 s came from a round believed to take ~36 s, which
-  was the Simulator running 3× slow. One `hypothesise` decode failure plus its retry spent
-  the whole budget, `setIntent` was refused, and the objective silently fell back to
-  `balanced` **every round** — losing the one step where the model chooses policy. Now
-  45 s, which clears a normal device round with one retry (~18 s) with room. *A guardrail
-  that routinely eats the thing it guards is worse than one that is switched off, because
-  it looks like coverage.*
-* **A one-word claim is not a claim.** The round plan rendered the headline as literally
-  `Unknown` — the model's `claim` field, which decoded perfectly and passed every
-  structural guard while saying nothing. `OutputValidator` checked for volume framing but
-  never that a claim *is* one.
-* **There was no grounding guard at all.** Layer 4 was the stance filter wearing the name.
-  The model naming a station absent from the menu — a payload the project's own injection
-  testing returned — had nothing to catch it.
-* **The stop and decline paths ended the visit before asking why.** `endedBecause` was
-  therefore written as `.unknown` every time, which is exactly the censored-data defect
-  below: the fit then averages lower bounds as though they were observations. Neither
-  path ends a visit now until the diner has answered.
-
-**Closed 2026-09-19 — a falsification instrument that could not falsify.**
-
-* **A `skip` hypothesis could never be contradicted.** The verdict tested every
-  expectation as `observed >= expected − 0.25`. `Rating.skip` scores `0.0`, so the
-  threshold sat at **−0.25 — below a 0…1 scale**, and every rating beat it. Expecting
-  `skip` is the claim *"this category is not worth the capacity"*: the one hypothesis
-  shape that is pure falsification, and it came back `supported` whatever the diner
-  rated. The comparison had been **copied into four files**, each commented *"the same
-  computation as…"*, so `evaluateHypothesis` — the tool whose own description calls it
-  *the only authority on whether the hypothesis holds* — carried it too. It is now one
-  `ValueEngine.verdict(_:expecting:)`, one-sided **in the direction the claim points**:
-  *expect good here* is falsified by worse ratings, *expect skip here* by better ones.
-  The `.good` and `.fine` verdicts are asserted unchanged, because TB's ground truth is
-  built from this same rule — and all 20 of its scenarios expect `.good` or `.fine`, so
-  **the −5% discrimination figure below is not confounded by this.**
-* **`budget` meant two different things.** Model calls in code, stomach capacity in the
-  prompts and tool descriptions — and the model, having no definition for it, echoed it
-  back as filler. Everything the model reads now says **capacity**; `LoopBudget` keeps
-  the word in code, where it only ever meant one thing. ⚠️ Whether this moves the decode
-  rate is **unmeasured** and needs a device run.
-
-### The capacity model could detect that it was wrong and could not learn from it
-
-`CapacityEngine.fittedMax(from:)` averaged the cumulative satiety of completed visits. **Those totals are lower bounds, not observations** — a meal that ended because the seating expired says only `S_max ≥ that total`. Averaging censored with uncensored data biased `S_max` **downward, and worse the more the app was used**, while every screen kept looking correct.
-
-**Closed 2026-09-19, and the censoring was the smaller half of it.** Layer 1 of the ladder — the within-meal correction — was **dead code**: `correctedMax` was defined, documented, listed in the design as *"flat ±20% off the latest reading"*, and **called by nothing**. `state(for:)` handed the planner the raw declared prior every round. So the fit was biased *and* unplugged.
-
-| Layer | What it does now |
-|---|---|
-| 0 · prior | What you said a full meal is, on the first screen |
-| 1 · within-meal | Every fullness reading implies a ceiling — *"four of five at 3.0 satiety"* puts `S_max` near 3.75. The estimate moves **half the distance to their mean, clamped at ±20% per meal**, and the planner reads the result |
-| 2 · across-meal | Fits on `fullness`-terminated meals only. A meal that ran out of clock is a lower bound: **it can raise the estimate and can never lower it** |
-| 3 · per-category density | Built, gated at n ≥ 8, **shipped silenced** — `satietyCost` still reads the §6b.1 prior |
-
-The falsification path is deliberately kept off the correction: `verdict` tests the **declared** prior, never the corrected figure. Testing the correction against the reading that produced it would make `checkCapacityModel` answer `consistent` whatever the diner said — the capacity model agreeing with itself by construction.
-
-**Layer 3 stays silent for a stated reason.** The §6b.1 density table has never been checked against real eating, and T64 — does `predictedFullness` track what a diner actually reports? — needs a real meal. The ordinal fallback (T65) was built *first*, so the branch that throws layer 3 away is proven runnable before layer 3 can mislead anyone.
-
-`checkCapacityModel` returned `consistent · over · under · insufficient` throughout. **The tool fired; the update rule behind it did not exist.** Now the diner's fullness report is a falsification the diner authored.
-
-### Agency level — the battery has now run, and it splits the claim in two
-
-**TB, the 20-scenario branch-selection battery, ran on 2026-09-18.** Three runs, 60
-scenario-executions, on iOS 26.5. It varies the one thing that should drive the branch —
-what the ratings say about the hypothesis — and holds everything else fixed. The move is
-read **raw, before `ConsistencyGuard` and the verdict guard**, because measuring after
-them measures the guards.
-
-The number is not the pivot rate. It is the difference between the pivot rate when the
-tools say `contradicted` and the pivot rate when they say `supported`:
-
-| Run | capacity signal | P(pivot \| contradicted) | P(pivot \| supported) | discrimination |
-|---|---|---|---|---|
-| 1 | pinned at `insufficient` *(confounded — see below)* | 17% (1/6) | 29% (2/7) | **−12%** |
-| 2 | held `consistent` | 0% (0/3) | 0% (0/6) | **0%** |
-| 3 | held `consistent` | 0% (0/5) | 0% (0/4) | **0%** |
-| **All three** | | **7% (1/14)** | **12% (2/17)** | **−5%** |
-
-**Branch selection does not read the evidence.** Across 31 decoded decisions the model
-chose `pivot` three times, and it was no likelier to do so when the tools had just told
-it the hypothesis was contradicted. On the two clean runs it chose `exploit` every single
-time it decoded — 18 for 18.
-
-This is the `ConsistencyGuard` beat, at scale and in the model's own words. Repeatedly the
-`because` field reads *"The tools say the hypothesis is contradicted; the value is at a
-different category"* and the `move` field says `exploit`. Once, in reverse: *"The tools
-support my hypothesis … so I'll pivot."*
-
-**So the claim splits, and both halves are now measured rather than argued:**
-
-* **Hypothesis composition is L3 and stands.** The model composes `claim` free-form over
-  typed primitives; TB does not measure this and does not disturb it.
-* **Branch selection is not agentic.** `ConsistencyGuard`, the verdict guard and
-  `StopGuard` produce the correct behaviour — the model does not. Path variance comes
-  from the guards, not from a choice. **Layer 6 is not a safety net over a working
-  chooser; it is the chooser.** That is worth saying plainly, because it is the honest
-  version and it is still a legitimate architecture.
-
-#### Two findings that came out of running it
-
-**Run 1 was confounded, and the confound is instructive.** It supplied no fullness
-readings, so `checkCapacityModel` answered *"insufficient — the budget is an unverified
-estimate"* in all twenty scenarios. The model folded that constant into its move:
-*"the hypothesis is supported, but the remaining budget is unverified, so I'll pivot."*
-One input varied and a second sat pinned at a value that argues for changing course. Runs
-2 and 3 hold it at `consistent`. **A second tool returning a constant is not neutral —
-the model will reason from it.**
-
-*(Both strings are quoted as they read in September. The tool now says "the capacity
-estimate is unverified" — `budget` was the word that meant model calls in code and
-stomach capacity in the prompts, and the model had no definition for either.)*
-
-**Decode failure clusters on the branch that was already losing.** Across the two clean
-runs, `contradicted` scenarios failed to decode **5/14** against **2/14** for `supported`,
-and run 1's one `guardrailViolation` also landed on a `contradicted` scenario. *n* is too
-small to call this on its own, and it points the same way as everything else: the pivot
-branch is disfavoured twice over — chosen less often, and the scenarios that should
-produce it are likelier to fail on the way out. Worth its own measurement.
-
-Overclaiming is the fastest way to lose anyone who probes. The measurement is above; the
-claim is exactly as wide as the measurement.
 ---
 
-## A note on the palette
+## Agency level
 
-The app is Alabaster Grey `#E5E4E2` / Onyx `#0A0A0A` / Blue Slate `#536878`, and the warm option was rejected on the stance rather than on taste.
+**TB, the 20-scenario branch battery, ran three times on 2026-09-18.** It varies the one thing that should drive the branch — what the ratings say about the hypothesis — and reads the move **before** the guards:
 
-Saturated red-orange — `#AA0003`, `#FF4500`, `#FF6B6B` — is the appetite palette, the one fast-food branding uses to drive consumption. Volume framing is forbidden by the app's own stance, and `OutputValidator` enforces it in code. **Shipping the colour of "eat more" while the copy says "stop before you regret it" would contradict the app's own guardrail.**
+| | P(pivot \| contradicted) | P(pivot \| supported) | discrimination |
+|---|---|---|---|
+| All three runs | 7% (1/14) | 12% (2/17) | **−5%** |
 
-Onyx `#0A0A0A` is also the Dynamic Island, which is the primary in-meal interface — a near-black base reads as part of the hardware rather than a window on top of it, and survives a dim grill-at-your-table room.
+**Branch selection does not read the evidence.** On the two clean runs the model chose `exploit` every time it decoded, 18 for 18 — often right after writing *"the tools say the hypothesis is contradicted"*. So the claim splits, and both halves are measured:
 
-One trap, recorded because it is easy to walk into: Blue Slate `#536878` is the brand accent and **fails body text on Onyx at 3.4:1**. Dark mode uses Blue Slate Light `#7C93A6` (6.2:1) instead. Colour is never the only indicator — every exclusion state carries a word: *safe* · *excluded* · *ask staff*.
+* **Hypothesis composition and the round objective are the model's** — it composes the claim over typed primitives and sets the policy the planner optimises.
+* **Branch selection is not agentic.** `ConsistencyGuard`, the verdict guard and `StopGuard` produce the right behaviour; the model does not. **The guard layer is the chooser, not a safety net over one** — the honest version, and still a legitimate architecture.
+
+The self-calibration mechanism (`getBasisCalibration`) is built and silenced by its own minimum *n*: **L3 shipped, with an L4 mechanism implemented and refusing to claim on this little data.** Do not round it up — the follow-up question is one sentence long: *how many meals is that?*
+
+---
+
+## Limitations
+
+| Limitation | Consequence |
+|---|---|
+| **Capacity is inferred, never measured** | A fitted estimate that improves over visits; a coarse default carries meal one |
+| **The tier argument needs repeat visits** | Useless on a first visit anywhere — it says so and refuses |
+| **It sees only what you log** | An unlogged plate is invisible |
+| **Ingredients are invisible beyond the menu** | Cross-contamination and marinades are unknowable; *unknown* keeps such dishes out of the plan and defers to staff |
+| **Flavour fatigue needs many meals** | A population prior until personal data accumulates |
+| **The agent chooses what a round is for, not which dishes** | Deliberate — the model never computes — and a real boundary on the agency claim |
+
+**Where it does not work:** self-serve buffets · single-tier venues (the tier decision does not exist; `declineToOptimise` weighs it) · menus under ~15 items · à la carte · a diner who never rates.
+
+**Permanently out of scope:** nutrition advice · calories · body metrics · food-safety judgements · restaurant discovery or booking · ordering automation.
