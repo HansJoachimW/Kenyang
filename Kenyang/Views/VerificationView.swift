@@ -71,12 +71,12 @@ struct VerificationView: View {
             runSequence([harness])
         } label: {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(harness.name)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Palette.ink)
                     Text(harness.detail)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Palette.muted)
                     Text(harness.id)
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.tertiary)
@@ -87,7 +87,7 @@ struct VerificationView: View {
                 } else if let duration = elapsed[harness.id] {
                     Text(format(duration))
                         .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Palette.muted)
                 }
             }
         }

@@ -42,7 +42,7 @@ struct RoundRoleBadge: View {
             .font(.caption2.weight(.medium))
             .foregroundStyle(isRecon ? Palette.accent : Palette.surface)
             .padding(.horizontal, 8)
-            .padding(.vertical, 3)
+            .padding(.vertical, 4)
             .background {
                 if isRecon {
                     Capsule().strokeBorder(Palette.accent, lineWidth: 1)
@@ -65,7 +65,7 @@ struct AttributionBadge: View {
             .font(.caption2.weight(.medium))
             .foregroundStyle(isDeterministic ? Palette.accent : Palette.surface)
             .padding(.horizontal, 8)
-            .padding(.vertical, 3)
+            .padding(.vertical, 4)
             .background {
                 if isDeterministic {
                     Capsule().strokeBorder(Palette.accent, lineWidth: 1)
@@ -84,7 +84,7 @@ struct VerdictBadge: View {
             .font(.caption2.weight(.medium))
             .foregroundStyle(verdict.tint)
             .padding(.horizontal, 8)
-            .padding(.vertical, 3)
+            .padding(.vertical, 4)
             .background(verdict.tint.opacity(0.12), in: Capsule())
             .accessibilityLabel(verdict.word)
     }

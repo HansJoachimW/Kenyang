@@ -71,6 +71,10 @@ struct StartView: View {
     @State private var showingCapture = false
     @State private var tierVenue: Restaurant?
     @State private var proactiveOn = false
+    /// A meal waiting on the avoid-list check. Dismissing the check without confirming
+    /// drops it, so no meal starts on a list the diner did not look at.
+    @State private var pendingStart: (() -> Void)?
+    @State private var checkingAvoidList = false
     @AppStorage("onboarding.plates") private var plates: Double = SessionDefaults.plates
 
     /// Screen 2 belongs to ARRIVAL, before a session exists. It only has something to
@@ -80,20 +84,23 @@ struct StartView: View {
     }
 
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             Text("The goal is kenyang, not maximum.")
                 .font(.headline)
                 .multilineTextAlignment(.center)
             Text("Kenyang plans a buffet as a sequence under a shrinking budget. It proposes; you decide.")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(.center)
             Button("Start a demo session") {
-                model.startSession(restaurantName: "Demo Buffet",
-                                   pricePerHead: SessionDefaults.pricePerHead,
-                                   seatingLimit: SessionDefaults.seatingMinutes,
-                                   plates: plates,
-                                   spread: DemoSpread.standard)
+                pendingStart = {
+                    model.startSession(restaurantName: "Demo Buffet",
+                                       pricePerHead: SessionDefaults.pricePerHead,
+                                       seatingLimit: SessionDefaults.seatingMinutes,
+                                       plates: plates,
+                                       spread: DemoSpread.standard)
+                }
+                checkingAvoidList = true
             }
             .buttonStyle(.borderedProminent)
 
@@ -118,27 +125,46 @@ struct StartView: View {
         }
         .padding()
         .onAppear { proactiveOn = ProactiveTrigger.shared.isEnabled }
-        .sheet(item: $tierVenue) { venue in
+        // A second sheet cannot open while the first is still closing, so the check
+        // opens from the first one's dismissal.
+        .sheet(item: $tierVenue, onDismiss: checkIfPending) { venue in
             TierRecommendationView(restaurant: venue) { rank in
+                pendingStart = {
+                    model.startSession(restaurantName: venue.name,
+                                       pricePerHead: venue.tierPrice(rank: rank) ?? venue.pricePerHead,
+                                       seatingLimit: SessionDefaults.seatingMinutes,
+                                       plates: plates,
+                                       spread: DemoSpread.standard)
+                }
                 tierVenue = nil
-                model.startSession(restaurantName: venue.name,
-                                   pricePerHead: venue.tierPrice(rank: rank) ?? venue.pricePerHead,
-                                   seatingLimit: SessionDefaults.seatingMinutes,
-                                   plates: plates,
-                                   spread: DemoSpread.standard)
             } onOverride: {
                 tierVenue = nil
             }
         }
-        .sheet(isPresented: $showingCapture) {
+        .sheet(isPresented: $showingCapture, onDismiss: checkIfPending) {
             MenuCaptureView { menu in
-                model.startSession(restaurantName: menu.venueName,
-                                   pricePerHead: menu.pricePerHead,
-                                   seatingLimit: SessionDefaults.seatingMinutes,
-                                   plates: plates,
-                                   spread: menu.spread)
+                pendingStart = {
+                    model.startSession(restaurantName: menu.venueName,
+                                       pricePerHead: menu.pricePerHead,
+                                       seatingLimit: SessionDefaults.seatingMinutes,
+                                       plates: plates,
+                                       spread: menu.spread)
+                }
+                showingCapture = false
             }
         }
+        .sheet(isPresented: $checkingAvoidList, onDismiss: { pendingStart = nil }) {
+            AvoidListCheck {
+                let start = pendingStart
+                pendingStart = nil
+                checkingAvoidList = false
+                start?()
+            }
+        }
+    }
+
+    private func checkIfPending() {
+        if pendingStart != nil { checkingAvoidList = true }
     }
 }
 
@@ -154,9 +180,10 @@ struct StartView: View {
 /// information arriving, not decoration.
 struct PlanningView: View {
     let model: SessionViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             ForEach(model.progress.completed) { done in
                 HStack(spacing: 8) {
                     Text(done.stage.label)
@@ -180,7 +207,7 @@ struct PlanningView: View {
                         .font(.title3.weight(.medium))
                         .foregroundStyle(Palette.ink)
 
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 4) {
                         ForEach(model.progress.toolLines, id: \.self) { line in
                             Text(line)
                                 .font(.caption.monospaced())
@@ -199,7 +226,7 @@ struct PlanningView: View {
                     .font(.caption2.monospaced())
                     .foregroundStyle(Palette.muted)
                 }
-                .animation(.easeOut(duration: 0.24), value: model.progress.toolLines)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.24), value: model.progress.toolLines)
             }
 
             Spacer()
@@ -213,7 +240,7 @@ struct PlanningView: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(.easeOut(duration: 0.24), value: model.progress.completed.count)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.24), value: model.progress.completed.count)
     }
 }
 
@@ -244,7 +271,7 @@ struct PlanView: View {
                         VStack(alignment: .leading) {
                             Text(item.dishName)
                             Text("\(item.category.label) · \(item.portion.rawValue)")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(Palette.muted)
                         }
                         Spacer()
                         RoundRoleBadge(isRecon: item.isRecon)
@@ -282,7 +309,7 @@ struct HeldBackRow: View {
             Label(dish.name, systemImage: "questionmark.circle").font(.subheadline)
             ForEach(model.openQuestions(for: dish), id: \.self) { term in
                 HStack {
-                    Text("Contains \(term)?").font(.footnote).foregroundStyle(.secondary)
+                    Text("Contains \(term)?").font(.footnote).foregroundStyle(Palette.muted)
                     Spacer()
                     Button("No")  { model.answer(term, contains: false, for: dish) }
                     Button("Yes") { model.answer(term, contains: true,  for: dish) }
@@ -291,12 +318,13 @@ struct HeldBackRow: View {
                 .controlSize(.small)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 }
 
 struct EatingView: View {
     let model: SessionViewModel
+    @ScaledMetric(relativeTo: .largeTitle) private var figureSize: CGFloat = 44
 
     var body: some View {
         List {
@@ -318,7 +346,7 @@ struct EatingView: View {
                         VStack(alignment: .leading, spacing: 0) {
                             if let minutes = model.minutesRemaining {
                                 Text("\(minutes)")
-                                    .font(.system(size: 44, weight: .semibold).monospacedDigit())
+                                    .font(.system(size: figureSize, weight: .semibold).monospacedDigit())
                                     .foregroundStyle(Palette.ink)
                                 Text("min of seating left").font(.caption).foregroundStyle(Palette.muted)
                             } else {
@@ -329,20 +357,37 @@ struct EatingView: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.vertical, 8)
+                .listRowBackground(Self.rowBackground)
             }
             Section("Rate what you ate") {
                 // `servedItems`, not `plan?.items` — the plan is replaced on every
                 // re-plan and this list must not lose a dish that was already served.
+                if model.servedItems.isEmpty {
+                    Text("No dishes to rate yet. They appear here when you accept a round.")
+                        .font(.footnote)
+                        .foregroundStyle(Palette.muted)
+                        .listRowBackground(Self.rowBackground)
+                }
                 ForEach(model.servedItems) { item in
                     OrderRow(model: model, item: item)
+                        .listRowBackground(Self.rowBackground)
                 }
             }
             Section {
                 Button("Plan the next round") { model.nextRound() }
+                    .listRowBackground(Self.rowBackground)
                 Button("End the meal") { model.endSession() }
+                    .listRowBackground(Self.rowBackground)
             }
         }
+        // Every other screen sits on `surface`; a stock List would put this one on the
+        // system's grouped grey, a second grey the palette does not have.
+        .scrollContentBackground(.hidden)
+        .background(Palette.surface)
     }
+
+    /// The same tint the round plan uses for its boxes.
+    private static let rowBackground = Palette.muted.opacity(0.10)
 }
 
 /// One dish: how many of its orders were eaten, and its one rating for the round.
@@ -361,7 +406,12 @@ struct OrderRow: View {
                 Text("\(eaten) of \(item.quantity) eaten")
                     .font(.caption.monospacedDigit()).foregroundStyle(Palette.muted)
             }
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Button("Remove one", systemImage: "minus") { model.unlogOrder(item) }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.bordered)
+                    .disabled(eaten == 0)
+                    .accessibilityLabel("Remove one plate of \(item.dishName)")
                 Button("Ate one", systemImage: "plus") { model.logOrder(item) }
                     .buttonStyle(.bordered)
                     .disabled(eaten >= item.quantity)
@@ -378,7 +428,7 @@ struct OrderRow: View {
             }
             .font(.caption)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 }
 
@@ -390,7 +440,7 @@ struct TerminalView: View {
     var body: some View {
         VStack(spacing: 16) {
             Text(title).font(.title2.bold())
-            Text(message).multilineTextAlignment(.center).foregroundStyle(.secondary)
+            Text(message).multilineTextAlignment(.center).foregroundStyle(Palette.muted)
             Button("Done") { model.endSession() }.buttonStyle(.borderedProminent)
         }
         .padding()

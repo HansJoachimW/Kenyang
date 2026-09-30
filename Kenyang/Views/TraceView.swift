@@ -9,6 +9,7 @@ import SwiftUI
 struct TraceView: View {
     let trace: TraceLog
     @State private var expanded: UUID?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         NavigationStack {
@@ -22,9 +23,9 @@ struct TraceView: View {
                         Divider()
                     }
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 24)
                 .padding(.vertical, 12)
-                .animation(.easeOut(duration: 0.2), value: expanded)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: expanded)
             }
             .background(Palette.surface)
             .navigationTitle("Trace")
@@ -49,7 +50,7 @@ struct TraceView: View {
             }
             Text(entry.detail).font(.caption).foregroundStyle(Palette.muted)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
     }
 
     /// The money shot. `exploit` is chosen ~92% of the time, so the branching the diner
@@ -81,9 +82,9 @@ struct TraceView: View {
                     Text("“\(override.wrote)”")
                         .font(.footnote)
                         .foregroundStyle(Palette.ink)
-                        .padding(10)
+                        .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Palette.muted.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                        .background(Palette.muted.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
                     HStack(spacing: 8) {
                         Text("because").font(.caption).foregroundStyle(Palette.muted)
                         AttributionBadge(isDeterministic: false)
@@ -119,18 +120,18 @@ struct TraceView: View {
                     .foregroundStyle(Palette.muted)
             }
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
         .overlay {
             RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.accent.opacity(0.5), lineWidth: 1)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
     }
 
     private func part<Content: View>(_ label: String,
                                      @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.caption2.weight(.semibold)).tracking(0.6)
                 .foregroundStyle(Palette.muted)

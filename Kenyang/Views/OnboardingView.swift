@@ -10,22 +10,16 @@ import SwiftUI
 /// now: `KenyangStore.addExclusion` existed, the ternary `ExclusionValidator` was built
 /// on it and eight guardrail references read it, and no screen ever called it.
 struct OnboardingView: View {
-    @Environment(\.kenyangStore) private var store
-
     @AppStorage("onboarding.completed") private var completed = false
     @AppStorage("onboarding.plates") private var plates: Double = SessionDefaults.plates
-
-    @State private var exclusions: [String] = []
-    @State private var draft = ""
-    @State private var addingIngredient = false
 
     let onDone: () -> Void
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: 24) {
                 stance
-                avoidList
+                AvoidListEditor()
                 capacity
             }
             .padding(24)
@@ -41,7 +35,6 @@ struct OnboardingView: View {
             .padding(24)
             .background(Palette.surface)
         }
-        .task { exclusions = store.exclusions() }
     }
 
     // MARK: -
@@ -57,8 +50,56 @@ struct OnboardingView: View {
         }
     }
 
-    private var avoidList: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private var capacity: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel("How much is a full meal for you?")
+
+            // Five options, no slider, no units. It is a prior, not a measurement — the
+            // within-meal and across-meal layers correct it. Asking for precision the
+            // app cannot use would be theatre.
+            HStack(spacing: 12) {
+                ForEach([2.0, 3.0, 4.0, 5.0, 6.0], id: \.self) { value in
+                    Button { plates = value } label: {
+                        Text("\(Int(value))")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .foregroundStyle(plates == value ? Palette.surface : Palette.ink)
+                            .background {
+                                if plates == value {
+                                    RoundedRectangle(cornerRadius: 10).fill(Palette.accent)
+                                } else {
+                                    RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.muted, lineWidth: 1)
+                                }
+                            }
+                    }
+                    .accessibilityLabel("\(Int(value)) plates")
+                    .accessibilityAddTraits(plates == value ? [.isSelected] : [])
+                }
+            }
+
+            Text("plates, roughly. It corrects itself as you eat.")
+                .font(.caption)
+                .foregroundStyle(Palette.muted)
+        }
+    }
+
+    private func finish() {
+        completed = true
+        onDone()
+    }
+}
+
+/// The avoid list, editable. One editor for onboarding and for the check at the start
+/// of every meal — a second copy would be a second place for the list to drift.
+struct AvoidListEditor: View {
+    @Environment(\.kenyangStore) private var store
+
+    @State private var exclusions: [String] = []
+    @State private var draft = ""
+    @State private var addingIngredient = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
             SectionLabel("Anything you need to avoid?")
 
             // The chips are the only place Dark Wine appears: this is the list the diner
@@ -70,7 +111,7 @@ struct OnboardingView: View {
                         store.removeExclusion(term)
                         exclusions = store.exclusions()
                     } label: {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 8) {
                             Text(term).font(.subheadline.weight(.medium))
                             Image(systemName: "xmark").font(.caption2.weight(.bold))
                         }
@@ -110,44 +151,33 @@ struct OnboardingView: View {
                 draft = ""
             }
         }
+        .task { exclusions = store.exclusions() }
     }
+}
 
-    private var capacity: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionLabel("How much is a full meal for you?")
+/// Before the first round of every meal: the avoid list, once, with the chance to change
+/// it. It is the one input nothing in the app overrides, so it is confirmed per meal
+/// rather than trusted from whenever it was last set.
+struct AvoidListCheck: View {
+    let onConfirm: () -> Void
 
-            // Five options, no slider, no units. It is a prior, not a measurement — the
-            // within-meal and across-meal layers correct it. Asking for precision the
-            // app cannot use would be theatre.
-            HStack(spacing: 10) {
-                ForEach([2.0, 3.0, 4.0, 5.0, 6.0], id: \.self) { value in
-                    Button { plates = value } label: {
-                        Text("\(Int(value))")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .foregroundStyle(plates == value ? Palette.surface : Palette.ink)
-                            .background {
-                                if plates == value {
-                                    RoundedRectangle(cornerRadius: 10).fill(Palette.accent)
-                                } else {
-                                    RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.muted, lineWidth: 1)
-                                }
-                            }
-                    }
-                    .accessibilityLabel("\(Int(value)) plates")
-                    .accessibilityAddTraits(plates == value ? [.isSelected] : [])
-                }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Still avoiding these?")
+                .font(.title2.bold())
+                .foregroundStyle(Palette.ink)
+            AvoidListEditor()
+            Spacer()
+            Button(action: onConfirm) {
+                Text("Continue").frame(maxWidth: .infinity)
             }
-
-            Text("plates, roughly. It corrects itself as you eat.")
-                .font(.caption)
-                .foregroundStyle(Palette.muted)
+            .buttonStyle(.borderedProminent)
+            .tint(Palette.accent)
+            .controlSize(.large)
         }
-    }
-
-    private func finish() {
-        completed = true
-        onDone()
+        .padding(24)
+        .background(Palette.surface)
+        .presentationDetents([.medium, .large])
     }
 }
 

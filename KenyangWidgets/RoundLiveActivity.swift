@@ -22,7 +22,7 @@ struct RoundLiveActivity: Widget {
                     HStack(spacing: 8) {
                         CapacityRing(fraction: context.state.fractionRemaining)
                             .frame(width: 26, height: 26)
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: 0) {
                             Text(context.state.platesText)
                                 .font(.caption.weight(.medium))
                             Text("Round \(context.state.roundIndex)")
@@ -32,7 +32,7 @@ struct RoundLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     if let minutes = context.state.minutesText {
-                        VStack(alignment: .trailing, spacing: 1) {
+                        VStack(alignment: .trailing, spacing: 0) {
                             Text(minutes).font(.caption.weight(.medium))
                             Text("last order").font(.caption2).foregroundStyle(Palette.muted)
                         }
@@ -109,12 +109,12 @@ private struct LockScreenBar: View {
         let surface = Color(Palette.surface.resolve(in: environment))
         let ink = Color(Palette.ink.resolve(in: environment))
 
-        HStack(spacing: 14) {
+        HStack(spacing: 16) {
             CapacityRing(fraction: state.fractionRemaining)
                 .frame(width: 44, height: 44)
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
                     Text(attributes.venueName)
                         .font(.footnote.weight(.medium))
                         .lineLimit(1)
@@ -134,7 +134,7 @@ private struct LockScreenBar: View {
 
             Spacer(minLength: 0)
 
-            VStack(spacing: 6) {
+            VStack(spacing: 4) {
                 if let minutes = state.minutesText {
                     Text(minutes).font(.caption2.weight(.medium)).foregroundStyle(Palette.accent)
                 }
@@ -143,7 +143,7 @@ private struct LockScreenBar: View {
                     .font(.caption2)
             }
         }
-        .padding(14)
+        .padding(16)
         .foregroundStyle(ink)
         .activityBackgroundTint(surface)
         .activitySystemActionForegroundColor(ink)

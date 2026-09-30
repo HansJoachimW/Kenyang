@@ -17,13 +17,15 @@ struct TierRecommendationView: View {
     let restaurant: Restaurant
     let onAccept: (Int) -> Void
     let onOverride: () -> Void
+    /// The design's 40 pt, scaled with the diner's text size.
+    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 40
 
     private var verdict: TierEngine.Verdict { TierEngine.verdict(for: restaurant) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 16) {
                     Text("\(restaurant.name.uppercased()) · BEFORE YOU ORDER")
                         .font(.caption.weight(.semibold)).tracking(0.6)
                         .foregroundStyle(Palette.accent)
@@ -47,9 +49,9 @@ struct TierRecommendationView: View {
     // MARK: - It can argue
 
     private func confident(tier: String, habitual: String, saving: Double?, evidence: [TierEngine.Evidence]) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             Text("Go \(tier).")
-                .font(.system(size: 40, weight: .bold))
+                .font(.system(size: heroSize, weight: .bold))
                 .foregroundStyle(Palette.ink)
 
             Text(sentence(tier: tier, habitual: habitual, saving: saving))
@@ -66,7 +68,7 @@ struct TierRecommendationView: View {
             Divider()
 
             ForEach(evidence) { row in
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(row.headline).font(.subheadline.weight(.semibold)).foregroundStyle(Palette.ink)
                     HStack(spacing: 8) {
                         Text("\(row.tool) · \(row.detail)")
@@ -89,14 +91,14 @@ struct TierRecommendationView: View {
     }
 
     private var ladder: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             ForEach(Array(restaurant.tierNames.enumerated()), id: \.offset) { index, name in
                 HStack {
                     Text(name)
                         .font(.subheadline.weight(isRecommended(index) ? .semibold : .regular))
                         .foregroundStyle(isRecommended(index) ? Palette.accent : Palette.ink)
                     Spacer()
-                    Text(restaurant.tierPrice(rank: index).map { "\(rupiah($0))++" } ?? "—")
+                    Text(restaurant.tierPrice(rank: index).map { "\(rupiah($0))++" } ?? "n/a")
                         .font(.subheadline.monospaced().weight(isRecommended(index) ? .semibold : .regular))
                         .foregroundStyle(isRecommended(index) ? Palette.accent : Palette.ink)
                 }
@@ -113,10 +115,10 @@ struct TierRecommendationView: View {
     // MARK: - It cannot argue yet
 
     private func refusal(visits: Int, needed: Int, cheapest: String, missing: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             Text(visits == 1 ? "One visit isn't enough to argue with."
                              : "\(visits) visits isn't enough to argue with.")
-                .font(.system(size: 40, weight: .bold))
+                .font(.system(size: heroSize, weight: .bold))
                 .foregroundStyle(Palette.ink)
 
             Text("The cheapest tier that has what you came for is \(cheapest). That is the default, not a recommendation.")
@@ -131,25 +133,25 @@ struct TierRecommendationView: View {
                     .font(.footnote)
                     .foregroundStyle(Palette.ink)
             }
-            .padding(14)
+            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.unknown.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("WHAT IT WOULD NEED")
                     .font(.caption.weight(.semibold)).tracking(0.6)
                     .foregroundStyle(Palette.accent)
                 ForEach(missing, id: \.self) { item in
-                    Text("— \(item)").font(.caption.monospaced()).foregroundStyle(Palette.muted)
+                    Text("· \(item)").font(.caption.monospaced()).foregroundStyle(Palette.muted)
                 }
             }
         }
     }
 
     private var noLadder: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             Text("One tier, nothing to choose.")
-                .font(.system(size: 40, weight: .bold))
+                .font(.system(size: heroSize, weight: .bold))
                 .foregroundStyle(Palette.ink)
             Text("This venue prints a single menu, so there is no tier decision to make. Kenyang will plan the rounds instead.")
                 .font(.body).foregroundStyle(Palette.ink)

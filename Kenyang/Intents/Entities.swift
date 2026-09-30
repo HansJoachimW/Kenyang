@@ -285,7 +285,7 @@ struct VisitEntity: AppEntity, IndexedEntity {
 
     var attributeSet: CSSearchableItemAttributeSet {
         let set = defaultAttributeSet
-        set.title = "\(venueName) — \(startedAt.formatted(date: .abbreviated, time: .omitted))"
+        set.title = "\(venueName) · \(startedAt.formatted(date: .abbreviated, time: .omitted))"
         set.contentDescription = "\(ratedCount) dishes rated"
         set.startDate = startedAt
         return set

@@ -12,17 +12,18 @@ import SwiftUI
 struct DeclineView: View {
     let model: SessionViewModel
     let message: String
+    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 38
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 16) {
                     Text("TRIAGE GUARD · COMPUTED, NOT CHOSEN")
                         .font(.caption.weight(.semibold)).tracking(0.6)
                         .foregroundStyle(Palette.accent)
 
                     Text("Nothing here needs sequencing.")
-                        .font(.system(size: 38, weight: .bold))
+                        .font(.system(size: heroSize, weight: .bold))
                         .foregroundStyle(Palette.ink)
 
                     Text(message)

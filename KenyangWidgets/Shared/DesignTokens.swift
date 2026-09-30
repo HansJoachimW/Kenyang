@@ -14,7 +14,7 @@ enum Palette {
     static let safe     = adaptive(light: 0x4A6147, dark: 0xADBDAB)
     static let excluded = adaptive(light: 0x6F1D1B, dark: 0xC4756F)
     static let unknown  = adaptive(light: 0x7A5C15, dark: 0xD9A845)
-    static let muted    = adaptive(light: 0x6B6B6B, dark: 0x9A9A9A)
+    static let muted    = adaptive(light: 0x5F5F5F, dark: 0x9A9A9A)
 
     private static func adaptive(light: UInt32, dark: UInt32) -> Color {
         Color(uiColor: UIColor { traits in

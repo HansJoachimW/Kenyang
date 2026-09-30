@@ -274,6 +274,19 @@ final class KenyangStore {
         }
     }
 
+    /// Undo one plate. The newest unrated one goes first, so the dish keeps its rating
+    /// while any plate of it is still logged; the last plate takes the rating with it.
+    /// Returns `false` when nothing was logged.
+    @discardableResult
+    func removeOrder(of dishName: String, in visit: Visit, round: Int) -> Bool {
+        let logged = orders(of: dishName, in: visit, round: round).sorted { $0.at > $1.at }
+        guard let event = logged.first(where: { !$0.isRated }) ?? logged.first else { return false }
+        // An Action Button correction must not reach for an event that no longer exists.
+        if pendingLog?.event === event { pendingLog = nil }
+        delete(event)
+        return true
+    }
+
     /// One rating per dish per round. Capacity counts every order, but the value loop
     /// gets one observation however many plates were eaten — two plates of the same
     /// dish are not two independent opinions — so rating again replaces it. With

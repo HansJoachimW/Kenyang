@@ -159,16 +159,16 @@ struct AdjustGuard {
         switch direction {
         case .newThings:
             intent.reconShare = step(rejected.reconShare, by: 1)
-            intent.rationale = "Adjusted — more of this round spent on dishes you have not tried."
+            intent.rationale = "Adjusted: more of this round goes to dishes you have not tried."
         case .moreLiked:
             intent.reconShare = step(rejected.reconShare, by: -1)
-            intent.rationale = "Adjusted — more of this round spent on dishes you rated well."
+            intent.rationale = "Adjusted: more of this round goes to dishes you rated well."
         case .safer:
             intent.riskPosture = step(rejected.riskPosture, by: -1)
-            intent.rationale = "Adjusted — safer choices this round."
+            intent.rationale = "Adjusted: safer choices this round."
         case nil:
             intent.reconShare = rank(rejected.reconShare) >= 2 ? .quarter : .most
-            intent.rationale = "Adjusted — a different balance of learning and enjoying."
+            intent.rationale = "Adjusted: a different balance of learning and enjoying."
         }
         return intent
     }
@@ -212,7 +212,7 @@ struct StopGuard {
         case .capacityExhausted: "You have about a quarter plate left. Spend it on something you already know is good, then stop."
         case .seatingTimeOver:   "Whatever is already on the grill is the end of the meal."
         case .lastOrderPassed:   "Under fifteen minutes left. Anything ordered now is the last of it."
-        case .none:              "Nothing is wrong — you decided, and that is reason enough."
+        case .none:              "Nothing is wrong. You decided, and that is reason enough."
         }
     }
 
@@ -220,7 +220,7 @@ struct StopGuard {
         switch reason {
         case .capacityExhausted: "You have about a quarter plate left. Spend it on something you already know is good, then stop."
         case .seatingTimeOver:   "Seating time is up."
-        case .lastOrderPassed:   "Under fifteen minutes left — this is the last round."
+        case .lastOrderPassed:   "Under fifteen minutes left. This is the last round."
         case .none:              ""
         }
     }
@@ -236,7 +236,7 @@ struct TriageGuard {
         return !hasTierSpread && !hasCategorySpread
     }
 
-    static let declineMessage = "There isn't a decision problem here worth your attention — few items, one price tier, nothing to sequence. Just order what looks good."
+    static let declineMessage = "There isn't a decision problem here worth your attention: few items, one price tier, nothing to sequence. Just order what looks good."
 }
 
 struct StatisticalGuard {
@@ -331,7 +331,7 @@ enum ModelAvailability {
         switch self {
         case .ready:       ""
         case .downloading: "Apple Intelligence is still downloading. Planning with population priors until it finishes."
-        case .notEnabled:  "Apple Intelligence is turned off. Planning with population priors — turn it on in Settings for reasoning and explanations."
+        case .notEnabled:  "Apple Intelligence is turned off. Planning with population priors. Turn it on in Settings for reasoning and explanations."
         case .unsupported: "This device cannot run on-device models. Kenyang still plans rounds from priors and capacity maths, without narration."
         }
     }

@@ -29,7 +29,7 @@ struct RoundPlanView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 16) {
                     header
                     if let rejection = model.claimRejection { struck(rejection) }
                     hypothesis
@@ -64,7 +64,7 @@ struct RoundPlanView: View {
     @ViewBuilder
     private var hypothesis: some View {
         if let hypothesis = model.hypothesis {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(hypothesis.claim)
                     .font(.title.weight(.semibold))
                     .foregroundStyle(Palette.ink)
@@ -94,7 +94,7 @@ struct RoundPlanView: View {
     private func struck(_ rejection: ClaimRejection) -> some View {
         let isGuard = rejection.layer == .grounding
         let tint = isGuard ? Palette.unknown : Palette.muted
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: 4) {
             Text(rejection.layer.rawValue)
                 .font(.caption.weight(.semibold)).tracking(0.6)
                 .foregroundStyle(tint)
@@ -108,7 +108,7 @@ struct RoundPlanView: View {
                 .font(.footnote)
                 .foregroundStyle(isGuard ? Palette.unknown : Palette.ink)
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 10)
@@ -120,13 +120,13 @@ struct RoundPlanView: View {
         Text(message)
             .font(.footnote)
             .foregroundStyle(Palette.ink)
-            .padding(14)
+            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.unknown.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func guardBlock(_ entry: TraceEntry) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(entry.title.uppercased() + " FIRED")
                 .font(.caption.weight(.semibold)).tracking(0.6)
                 .foregroundStyle(Palette.ink)
@@ -139,7 +139,7 @@ struct RoundPlanView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Palette.accent)
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.muted.opacity(0.5), lineWidth: 1)
@@ -149,7 +149,7 @@ struct RoundPlanView: View {
     @ViewBuilder
     private var objective: some View {
         if let intent = model.intent {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("THIS ROUND IS FOR")
                     .font(.caption.weight(.semibold)).tracking(0.6)
                     .foregroundStyle(Palette.muted)
@@ -157,14 +157,14 @@ struct RoundPlanView: View {
                 Text("recon share: \(intent.reconShare.rawValue) · posture: \(intent.riskPosture.rawValue)")
                     .font(.caption).foregroundStyle(Palette.muted)
             }
-            .padding(14)
+            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.muted.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
         }
     }
 
     private var items: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(plan?.items ?? []) { item in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline) {
@@ -261,7 +261,7 @@ struct CapacityDots: View {
     private let total = 3
 
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 4) {
             ForEach(0..<total, id: \.self) { index in
                 Circle()
                     .fill(Double(index) < fraction * Double(total) ? Palette.accent : Palette.muted.opacity(0.3))

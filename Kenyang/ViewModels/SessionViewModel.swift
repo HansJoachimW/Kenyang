@@ -214,7 +214,7 @@ final class SessionViewModel {
                                  events: visit.tasteEvents,
                                  capacity: CapacityEngine.state(for: visit),
                                  exclusions: store.exclusions())
-        degradedMessage = "Planned from priors — you skipped the agent."
+        degradedMessage = "Planned from priors because you skipped the agent."
         phase = .awaitingApproval
     }
 
@@ -350,6 +350,12 @@ final class SessionViewModel {
         syncActivity()
     }
 
+    /// Undo a mis-tap. Capacity gives the plate back.
+    func unlogOrder(_ item: PlannedItem) {
+        guard let visit, store.removeOrder(of: item.dishName, in: visit, round: roundIndex) else { return }
+        syncActivity()
+    }
+
     func ordersEaten(_ item: PlannedItem) -> Int {
         guard let visit else { return 0 }
         return store.orders(of: item.dishName, in: visit, round: roundIndex).count
@@ -478,7 +484,7 @@ final class SessionViewModel {
 
     /// A figure with nothing to compare it against is not information.
     var orderedAgainstCover: String {
-        guard let visit else { return "—" }
+        guard let visit else { return "n/a" }
         let ordered = orderedValue.formatted(.number.precision(.fractionLength(0)))
         let cover = visit.pricePerHead.formatted(.number.precision(.fractionLength(0)))
         return "Rp \(ordered) of \(cover)"

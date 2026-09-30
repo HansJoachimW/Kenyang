@@ -14,19 +14,20 @@ import SwiftUI
 /// choice is not made to feel like a transgression.
 struct StopView: View {
     let model: SessionViewModel
+    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 40
 
     @State private var askingReason = false
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 16) {
                     Text("STOP GUARD · COMPUTED, NOT CHOSEN")
                         .font(.caption.weight(.semibold)).tracking(0.6)
                         .foregroundStyle(Palette.accent)
 
                     Text(headline)
-                        .font(.system(size: 40, weight: .bold))
+                        .font(.system(size: heroSize, weight: .bold))
                         .foregroundStyle(Palette.ink)
 
                     Text(StopGuard.detail(for: model.stopReason))
@@ -94,7 +95,7 @@ struct StopView: View {
     /// averages censored visits and biases itself downward, silently, worse the more the
     /// app is used.
     private var reasonQuestion: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("ONE QUESTION, THE LAST OF THREE")
                 .font(.caption.weight(.semibold)).tracking(0.6)
                 .foregroundStyle(Palette.accent)

@@ -55,7 +55,7 @@ struct CapacityWidgetView: View {
             CapacityRing(fraction: snapshot.fractionRemaining, lineWidth: 4)
 
         case .accessoryRectangular:
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(snapshot.venueName).font(.headline).lineLimit(1)
                 Text(snapshot.isActive ? "\(snapshot.platesText) left" : "No meal in progress")
                     .font(.caption)

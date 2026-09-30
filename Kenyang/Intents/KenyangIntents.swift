@@ -136,7 +136,7 @@ struct RecommendStopIntent: AppIntent {
         let capacity = CapacityEngine.state(for: visit)
         let reason = StopGuard.reason(capacity: capacity, minutesRemaining: visit.minutesRemaining)
         guard reason != .none else {
-            return .result(dialog: "Not yet — about \(String(format: "%.1f", capacity.plateEstimate)) plates left.")
+            return .result(dialog: "Not yet. About \(String(format: "%.1f", capacity.plateEstimate)) plates left.")
         }
         return .result(dialog: IntentDialog(stringLiteral: StopGuard.message(for: reason)))
     }
@@ -229,8 +229,8 @@ struct SetFullnessIntent: AppIntent {
         let predicted = CapacityEngine.predictedFullness(capacity)
         let note: String
         switch fullness.level - predicted {
-        case 2...:    note = "That is fuller than I expected — I will plan smaller rounds."
-        case ...(-2): note = "That is emptier than I expected — I had been too cautious."
+        case 2...:    note = "That is fuller than I expected, so I will plan smaller rounds."
+        case ...(-2): note = "That is emptier than I expected. I had been too cautious."
         default:      note = "That matches what I expected."
         }
         return .result(dialog: IntentDialog(stringLiteral: "Noted. \(note)"))
@@ -445,19 +445,19 @@ struct PlanSnippet: View {
     let capacity: CapacityState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(plan.rationale).font(.footnote).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(plan.rationale).font(.footnote).foregroundStyle(Palette.muted)
             ForEach(plan.items) { item in
                 HStack {
                     Text("\(item.dishName) ×\(item.quantity)").font(.subheadline)
                     Spacer()
                     Text(item.isRecon ? "recon" : "exploit")
-                        .font(.caption2).foregroundStyle(.secondary)
+                        .font(.caption2).foregroundStyle(Palette.muted)
                 }
             }
             DeferToStaffNote(plan: plan)
             Text("About \(String(format: "%.1f", capacity.plateEstimate)) plates left")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(Palette.muted)
             HStack {
                 Button(intent: AcceptRoundIntent()) { Text("Accept") }
                 Button(intent: AdjustRoundIntent()) { Text("Adjust") }
@@ -479,7 +479,7 @@ struct DeferToStaffNote: View {
         if plan.hasUnresolvedDishes {
             Text("Ask staff about: \(plan.deferToStaff.joined(separator: ", "))")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Palette.muted)
         }
     }
 }
@@ -488,10 +488,10 @@ struct DeferToStaffNote: View {
 /// never run with an unresolved parameter.
 struct StopReasonSnippet: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Why are you stopping?").font(.subheadline.weight(.medium))
             Text("Only “I am full” measures your capacity. The rest tell me the meal ended before you did.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(Palette.muted)
             ForEach(MealEnding.allCases, id: \.self) { ending in
                 Button(intent: EndMealIntent(reason: ending)) {
                     Text(label(for: ending)).frame(maxWidth: .infinity, alignment: .leading)
@@ -520,20 +520,20 @@ struct ReceiptSnippet: View {
     let capacity: CapacityState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Eating this round").font(.subheadline.weight(.medium))
             ForEach(plan?.items ?? []) { item in
                 HStack {
                     Text(item.dishName).font(.footnote)
                     Spacer()
                     Text(item.quantity == 1 ? "1 order" : "\(item.quantity) orders")
-                        .font(.caption2).foregroundStyle(.secondary)
+                        .font(.caption2).foregroundStyle(Palette.muted)
                 }
             }
             if let plan { DeferToStaffNote(plan: plan) }
             ProgressView(value: capacity.fractionRemaining)
             Text("About \(String(format: "%.1f", capacity.plateEstimate)) plates left")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(Palette.muted)
             Button(intent: RequestStopIntent()) { Text("Stop") }
                 .buttonStyle(.bordered)
         }
@@ -546,9 +546,9 @@ struct MealOverSnippet: View {
     let detail: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(headline).font(.subheadline.weight(.medium))
-            Text(detail).font(.footnote).foregroundStyle(.secondary)
+            Text(detail).font(.footnote).foregroundStyle(Palette.muted)
         }
         .padding()
     }
@@ -556,7 +556,7 @@ struct MealOverSnippet: View {
 
 struct EmptyPlanSnippet: View {
     var body: some View {
-        Text("Nothing to plan.").font(.footnote).foregroundStyle(.secondary).padding()
+        Text("Nothing to plan.").font(.footnote).foregroundStyle(Palette.muted).padding()
     }
 }
 

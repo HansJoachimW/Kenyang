@@ -702,7 +702,18 @@ final class VerificationRunner {
         let capped = model.ordersEaten(tuna) == 1
         emit("\(capped ? "✅" : "❌") \"Ate one\" ×3 on a 1-order dish → \(model.ordersEaten(tuna)) of 1 eaten")
 
-        let pass = once && split && capped
+        // "−" undoes a plate: the unrated one first, so the rating survives.
+        scratch.removeOrder(of: "Harami", in: visit, round: 1)
+        let haramiLeft = scratch.orders(of: "Harami", in: visit, round: 1)
+        let keepsRating = haramiLeft.count == 1 && haramiLeft.first?.isRated == true
+        emit("\(keepsRating ? "✅" : "❌") − on 2 plates (1 rated) → \(haramiLeft.count) left, rating kept: \(haramiLeft.first?.isRated == true)")
+
+        model.unlogOrder(tuna)
+        model.unlogOrder(tuna)
+        let floor = model.ordersEaten(tuna) == 0
+        emit("\(floor ? "✅" : "❌") − ×2 on 1 plate → \(model.ordersEaten(tuna)) eaten, never below zero")
+
+        let pass = once && split && capped && keepsRating && floor
         emit("one rating per dish per round: \(pass ? "PASS" : "FAIL")")
         emit("")
     }

@@ -108,7 +108,7 @@ enum TierEngine {
             detail: measured == 0
                 // The fit reads censored totals as if they were observations. Saying so
                 // on the screen is cheaper than a figure nobody can question.
-                ? "no meal here ended on fullness — this is a lower bound, not a measurement"
+                ? "no meal here ended on fullness, so this is a lower bound, not a measurement"
                 : "fitted on \(measured) fullness-terminated visit\(measured == 1 ? "" : "s")",
             tool: "checkCapacityModel"))
 

@@ -40,7 +40,7 @@ struct MenuCaptureView: View {
 
     private var importStage: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 16) {
                 intro
                 pickers
                 if model.isLoading { ProgressView().tint(Palette.accent) }
@@ -69,7 +69,7 @@ struct MenuCaptureView: View {
     }
 
     private var intro: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text("Read the menu once per venue.")
                 .font(.headline)
                 .foregroundStyle(Palette.ink)
@@ -120,7 +120,7 @@ struct MenuCaptureView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Palette.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+        .background(Palette.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func extractedRow(_ extracted: ExtractedText) -> some View {
@@ -149,7 +149,7 @@ struct MenuCaptureView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Palette.safe.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+        .background(Palette.safe.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var confirmStage: some View {
@@ -173,7 +173,7 @@ struct MenuCaptureView: View {
 
             Section {
                 ForEach($model.items) { $item in
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 4) {
                         TextField("Item name", text: $item.name)
                             .font(.footnote)
                         HStack {
@@ -233,6 +233,6 @@ struct MenuCaptureView: View {
             .foregroundStyle(Palette.excluded)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
-            .background(Palette.excluded.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+            .background(Palette.excluded.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
     }
 }
