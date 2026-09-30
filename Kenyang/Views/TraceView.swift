@@ -1,142 +1,113 @@
 import SwiftUI
 
-/// Screen 7 — the trace. The only place the whole reasoning is visible, and so the one
-/// screen designed for reading rather than glancing.
-///
-/// Design is not one of the graded criteria. This panel's job is to make the agentic
-/// behaviour and the guardrails *legible* — a beautiful screen that hides the reasoning
-/// is worth less here than a plain one that shows it.
+/// How each round was decided, marking what Kenyang calculated and what the AI wrote.
 struct TraceView: View {
     let trace: TraceLog
-    @State private var expanded: UUID?
+    @State private var expanded: TraceEntry.ID?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(trace.entries) { entry in
-                        row(entry)
-                            // Neighbours dim but stay visible, so an expanded entry
-                            // never loses its position in the path.
-                            .opacity(expanded == nil || expanded == entry.id ? 1 : 0.42)
-                        Divider()
-                    }
+            List(trace.entries) { entry in
+                if let override = entry.override {
+                    OverrideRow(entry: entry, override: override, isExpanded: expandedBinding(for: entry))
+                } else {
+                    EntryRow(entry: entry)
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 12)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: expanded)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .background(Palette.surface)
-            .navigationTitle("Trace")
+            .navigationTitle("How it decided")
+            .navigationBarTitleDisplayMode(.inline)
+            .overlay {
+                if trace.entries.isEmpty {
+                    ContentUnavailableView("Nothing decided yet", systemImage: "list.bullet.rectangle",
+                                           description: Text("Each round's reasoning shows up here."))
+                }
+            }
         }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: expanded)
     }
 
-    @ViewBuilder
-    private func row(_ entry: TraceEntry) -> some View {
-        if let override = entry.override {
-            overrideRow(entry, override)
-        } else {
-            plainRow(entry)
-        }
+    private func expandedBinding(for entry: TraceEntry) -> Binding<Bool> {
+        Binding(get: { expanded == entry.id }, set: { expanded = $0 ? entry.id : nil })
     }
+}
 
-    private func plainRow(_ entry: TraceEntry) -> some View {
+private struct EntryRow: View {
+    let entry: TraceEntry
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(entry.title).font(.subheadline.weight(.medium)).foregroundStyle(Palette.ink)
+                Text(entry.heading).font(.subheadline.weight(.medium)).foregroundStyle(Palette.ink)
                 Spacer()
-                AttributionBadge(isDeterministic: entry.isDeterministic)
+                AttributionBadge(isCalculated: entry.isCalculated)
             }
-            Text(entry.detail).font(.caption).foregroundStyle(Palette.muted)
-        }
-        .padding(.vertical, 12)
-    }
-
-    /// The money shot. `exploit` is chosen ~92% of the time, so the branching the diner
-    /// sees is produced by the guards rather than by the model choosing well — which
-    /// makes this simultaneously the most honest and the most impressive thing in the
-    /// product, and the only row that gets a fill, a border and a three-part layout.
-    private func overrideRow(_ entry: TraceEntry, _ override: GuardOverride) -> some View {
-        let isOpen = expanded == entry.id
-        return VStack(alignment: .leading, spacing: 12) {
-            Button {
-                expanded = isOpen ? nil : entry.id
-            } label: {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(entry.title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Palette.accent)
-                        .multilineTextAlignment(.leading)
-                    Spacer()
-                    Image(systemName: isOpen ? "chevron.down" : "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(Palette.accent)
+            if entry.isWorthShowingInFull {
+                Text(entry.detail).font(.caption).foregroundStyle(Palette.ink)
+            } else {
+                DisclosureGroup {
+                    Text("\(entry.title): \(entry.detail)")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(Palette.muted)
+                        .textSelection(.enabled)
+                } label: {
+                    Text("Technical details").font(.caption).foregroundStyle(Palette.muted)
                 }
             }
-            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 8)
+        .listRowBackground(Palette.surface)
+    }
+}
 
-            if isOpen {
-                // Three labelled parts, in reading order.
-                part("WHAT THE MODEL WROTE") {
-                    Text("“\(override.wrote)”")
+/// A guard overruling the AI: what it said, what it chose (struck through), and what
+/// Kenyang did instead.
+private struct OverrideRow: View {
+    let entry: TraceEntry
+    let override: GuardOverride
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 12) {
+                part("What the AI said") {
+                    Text("\u{201C}\(override.wrote)\u{201D}")
                         .font(.footnote)
                         .foregroundStyle(Palette.ink)
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Palette.muted.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-                    HStack(spacing: 8) {
-                        Text("because").font(.caption).foregroundStyle(Palette.muted)
-                        AttributionBadge(isDeterministic: false)
-                    }
                 }
-
-                part("WHAT THE MODEL THEN CHOSE") {
-                    // Struck through rather than hidden. The strike-through is the whole
-                    // point: the diner can see the app disagreeing with its own model.
-                    Text(override.chose)
+                part("What the AI then chose") {
+                    Text(override.chose.label)
                         .font(.title3.weight(.semibold))
                         .strikethrough()
                         .foregroundStyle(Palette.muted)
                 }
-
-                part("WHAT THE GUARD DID") {
-                    Text(override.did)
-                        .font(.footnote)
-                        .foregroundStyle(Palette.ink)
-                    Text(override.forced)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Palette.accent)
-                    HStack(spacing: 8) {
-                        Text("\(override.guardName) · layer \(override.layer)")
-                            .font(.caption.monospaced())
-                            .foregroundStyle(Palette.muted)
-                        AttributionBadge(isDeterministic: true)
-                    }
+                part("What Kenyang did") {
+                    Text(override.did).font(.footnote).foregroundStyle(Palette.ink)
+                    Text(override.forced.label).font(.title3.weight(.semibold)).foregroundStyle(Palette.accent)
                 }
-
-                Text("A guardrail overriding the agent is the system working. This one fires on a threshold, never on a judgement.")
+                Text("Kenyang overruling the AI is the app working as designed. It does this on a fixed rule, never on a hunch.")
                     .font(.caption)
                     .foregroundStyle(Palette.muted)
             }
+            .padding(.top, 8)
+        } label: {
+            Text(entry.heading).font(.subheadline.weight(.semibold)).foregroundStyle(Palette.accent)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
         .background(Palette.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.accent.opacity(0.5), lineWidth: 1)
-        }
-        .padding(.vertical, 12)
+        .listRowBackground(Palette.surface)
     }
 
-    private func part<Content: View>(_ label: String,
-                                     @ViewBuilder content: () -> Content) -> some View {
+    private func part<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.caption2.weight(.semibold)).tracking(0.6)
-                .foregroundStyle(Palette.muted)
+            SectionLabel(label, tint: Palette.muted)
             content()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

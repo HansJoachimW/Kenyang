@@ -1,23 +1,11 @@
 import SwiftUI
 
-/// Screen 2 — the tier recommendation, before you order.
-///
-/// The verdict is the headline, because it is the whole output. Evidence sits below it
-/// in reading order so the decision is glanceable and the argument is available, never
-/// the other way round.
-///
-/// **The refusal is the same screen, not an empty state.** Below three visits it says so,
-/// states the threshold and names what it would need — same layout, same weight, same
-/// confidence. *"I don't know yet, and here is what I'd need"* is the product working.
-///
-/// Never said here: "you wasted money on Premium six times." The rows report what
-/// happened; they never grade the diner for it. Opinionated about the food, neutral
-/// about the person.
+/// Which tier to buy, before ordering. Below three visits it refuses in the same layout,
+/// and says what it would need.
 struct TierRecommendationView: View {
     let restaurant: Restaurant
     let onAccept: (Int) -> Void
     let onOverride: () -> Void
-    /// The design's 40 pt, scaled with the diner's text size.
     @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 40
 
     private var verdict: TierEngine.Verdict { TierEngine.verdict(for: restaurant) }
@@ -46,8 +34,6 @@ struct TierRecommendationView: View {
         .background(Palette.surface)
     }
 
-    // MARK: - It can argue
-
     private func confident(tier: String, habitual: String, saving: Double?, evidence: [TierEngine.Evidence]) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Go \(tier).")
@@ -58,10 +44,9 @@ struct TierRecommendationView: View {
                 .font(.body)
                 .foregroundStyle(Palette.ink)
 
-            // Money is stated once, before the meal — the one place the design allows it.
             HStack(spacing: 8) {
-                AttributionBadge(isDeterministic: false)
-                Text("one sentence · everything below is arithmetic")
+                AttributionBadge(isCalculated: false)
+                Text("the sentence above · everything below is calculated")
                     .font(.caption).foregroundStyle(Palette.muted)
             }
 
@@ -71,10 +56,10 @@ struct TierRecommendationView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(row.headline).font(.subheadline.weight(.semibold)).foregroundStyle(Palette.ink)
                     HStack(spacing: 8) {
-                        Text("\(row.tool) · \(row.detail)")
-                            .font(.caption.monospaced())
+                        Text(row.detail)
+                            .font(.caption)
                             .foregroundStyle(Palette.muted)
-                        AttributionBadge(isDeterministic: true)
+                        AttributionBadge(isCalculated: true)
                     }
                 }
             }
@@ -112,8 +97,6 @@ struct TierRecommendationView: View {
         return false
     }
 
-    // MARK: - It cannot argue yet
-
     private func refusal(visits: Int, needed: Int, cheapest: String, missing: [String]) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(visits == 1 ? "One visit isn't enough to argue with."
@@ -126,10 +109,10 @@ struct TierRecommendationView: View {
                 .foregroundStyle(Palette.ink)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("INSUFFICIENT · n = \(visits), NEEDS \(needed)")
-                    .font(.caption.weight(.semibold).monospaced())
+                Text("NOT ENOUGH VISITS YET · \(visits) OF \(needed)")
+                    .font(.caption.weight(.semibold).monospacedDigit())
                     .foregroundStyle(Palette.unknown)
-                Text("After a \(ordinal(needed)) visit here it can compare what you ordered against what you finished. Until then it defaults down the ladder, because guessing high creates a cost you would try to eat your way out of.")
+                Text("After a \(ordinal(needed)) visit here it can compare what you ordered with what you finished. Until then it suggests the cheaper tier, because paying for more than you'll eat makes you want to eat more.")
                     .font(.footnote)
                     .foregroundStyle(Palette.ink)
             }
@@ -142,7 +125,7 @@ struct TierRecommendationView: View {
                     .font(.caption.weight(.semibold)).tracking(0.6)
                     .foregroundStyle(Palette.accent)
                 ForEach(missing, id: \.self) { item in
-                    Text("· \(item)").font(.caption.monospaced()).foregroundStyle(Palette.muted)
+                    Text("· \(item)").font(.caption).foregroundStyle(Palette.muted)
                 }
             }
         }
@@ -153,12 +136,10 @@ struct TierRecommendationView: View {
             Text("One tier, nothing to choose.")
                 .font(.system(size: heroSize, weight: .bold))
                 .foregroundStyle(Palette.ink)
-            Text("This venue prints a single menu, so there is no tier decision to make. Kenyang will plan the rounds instead.")
+            Text("This place has one menu, so there's no tier to choose. Kenyang will plan your rounds instead.")
                 .font(.body).foregroundStyle(Palette.ink)
         }
     }
-
-    // MARK: -
 
     private var actions: some View {
         HStack(spacing: 12) {

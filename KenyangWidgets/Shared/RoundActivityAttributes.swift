@@ -1,41 +1,41 @@
 import ActivityKit
 import Foundation
 
-/// What the Live Activity carries, and the only type the widget extension needs from
-/// the app.
-///
-/// **Primitives only, deliberately.** `ContentState` crosses a process boundary and is
-/// re-encoded on every update, so referencing `CapacityState`, `RoundPlan` or anything
-/// else from the model layer would drag the whole domain into the extension target to
-/// render four numbers. Everything here is derived once, in `LiveActivityController`,
-/// and shipped flat.
+/// What the Live Activity shows. Plain values only, so the widget extension never needs
+/// the app's model layer.
 struct RoundActivityAttributes: ActivityAttributes {
-
-    /// The four session states the design names. The bar and all three Island
-    /// presentations render from this one value, which is what stops them drifting.
     enum Phase: String, Codable, Hashable, Sendable {
-        case planning   // the agent is working out the round
-        case active     // a round is accepted and being eaten
-        case stopGuard  // a guardrail says the meal should end
-        case degraded   // no model; planning from priors
+        case planning, suggested, eating, roundDone, timeToStop
+
+        var label: String {
+            switch self {
+            case .planning:   "planning"
+            case .suggested:  "your next round"
+            case .eating:     "eating"
+            case .roundDone:  "round done"
+            case .timeToStop: "time to stop"
+            }
+        }
+    }
+
+    struct IngredientQuestion: Codable, Hashable, Sendable {
+        let dish: String
+        let ingredient: String
     }
 
     struct ContentState: Codable, Hashable {
         var phase: Phase
-        /// 0…1. The capacity ring — the one glyph shared by icon, bar, widget and Island.
         var fractionRemaining: Double
         var plateEstimate: Double
         var minutesToLastOrder: Int?
-        var roundIndex: Int
-        /// The next thing in plan order the diner has not logged yet.
-        var nextTarget: String?
-        /// Set only when the app has something earned to say — a stop reason or a
-        /// degraded-mode explanation. Never a running total, never money, never a
-        /// progress bar toward a ceiling that does not exist.
+        var round: Int
+        var nextDish: String?
         var message: String?
+        var suggestion: [String] = []
+        var question: IngredientQuestion?
 
         var platesText: String {
-            plateEstimate < 0.75 ? "½ plate" : "\(String(format: "%.1f", plateEstimate)) plates"
+            plateEstimate < 0.75 ? "½ plate" : "\(plateEstimate.formatted(.number.precision(.fractionLength(1)))) plates"
         }
 
         var minutesText: String? {

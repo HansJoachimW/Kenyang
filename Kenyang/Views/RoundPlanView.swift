@@ -1,42 +1,26 @@
 import SwiftUI
 
-/// Screen 4 — the round plan. The agentic core.
-///
-/// Four things the design binds, and each is the difference between an agent and a
-/// suggestion engine:
-///
-/// **Every item carries its reason.** One line under each dish, badged `COMPUTED`,
-/// naming the arithmetic that put it there. The model contributes the claim and the
-/// objective; beam search does the ordering, and the screen says which is which.
-///
-/// **The pre-registered expectation is on screen.** *"Committed before tasting: expects
-/// good."* Stating it before the plate arrives is what makes the diner's rating a
-/// falsification rather than feedback.
-///
-/// **The pivot shows its author.** `exploit` is chosen ~92% of the time, so the
-/// branching a diner sees is produced by the guards, not by the model choosing well.
-/// A guard that fires gets a bordered block naming itself. Concealing that would be the
-/// dishonest choice and the less impressive one.
-///
-/// **Stop is always plain text**, beside Adjust, at the same weight, on every round —
-/// never a warning, never a nudge, never absent.
+/// The round's plan: the AI's guess, the goal it set, and the dishes with the reason for
+/// each. When a guard overruled the AI, the screen says so.
 struct RoundPlanView: View {
-    let model: SessionViewModel
-    @State private var adjusting = false
+    let model: MealViewModel
+    @State private var isChoosingAdjustment = false
 
-    private var plan: RoundPlan? { model.plan }
+    private var session: MealSession { model.session }
+    private var plan: RoundPlan? { session.plan }
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header
-                    if let rejection = model.claimRejection { struck(rejection) }
-                    hypothesis
-                    if let message = model.degradedMessage { degraded(message) }
-                    if let guardEntry = model.lastGuardThisRound { guardBlock(guardEntry) }
-                    objective
-                    items
+                    if let rejection = model.coordinator.claimRejection { RejectedGuess(rejection: rejection) }
+                    guess
+                    if let note = session.note { NoteBox(text: note) }
+                    if let entry = session.trace.lastGuard { guardBox(entry) }
+                    goal
+                    ForEach(plan?.items ?? []) { PlannedDishCard(model: model, item: $0) }
+                    uncheckedElsewhere
                     footer
                 }
                 .padding(24)
@@ -46,115 +30,56 @@ struct RoundPlanView: View {
         .background(Palette.surface)
     }
 
-    // MARK: -
-
     private var header: some View {
         HStack {
-            Text("ROUND \(model.roundIndex)\(model.didPivot ? " · PIVOT" : "")")
-                .font(.caption.weight(.semibold)).tracking(0.6)
-                .foregroundStyle(Palette.accent)
+            SectionLabel("Round \(session.round)\(session.trace.changedCourse ? " · new direction" : "")")
             Spacer()
-            if let minutes = model.minutesRemaining {
-                Text("\(minutes) min").font(.caption.monospaced()).foregroundStyle(Palette.muted)
+            if let minutes = session.visit?.minutesRemaining {
+                Text("\(minutes) min").font(.caption.monospacedDigit()).foregroundStyle(Palette.muted)
             }
-            CapacityDots(fraction: model.capacity.fractionRemaining)
         }
     }
 
     @ViewBuilder
-    private var hypothesis: some View {
-        if let hypothesis = model.hypothesis {
+    private var guess: some View {
+        if let hypothesis = session.hypothesis {
+            let wasRejected = model.coordinator.claimRejection != nil
             VStack(alignment: .leading, spacing: 8) {
                 Text(hypothesis.claim)
                     .font(.title.weight(.semibold))
                     .foregroundStyle(Palette.ink)
                 HStack(spacing: 8) {
-                    AttributionBadge(isDeterministic: model.claimRejection != nil)
-                    Text(model.claimRejection == nil
-                         ? "basis: \(hypothesis.basis.rawValue) · confidence \(hypothesis.confidence.rawValue)"
-                         : "planned on the arithmetic alone")
+                    AttributionBadge(isCalculated: wasRejected)
+                    Text(wasRejected ? "planned from your numbers alone"
+                                     : "\(hypothesis.basis.label) · \(hypothesis.confidence.label)")
                         .font(.caption).foregroundStyle(Palette.muted)
                 }
-                // The claim is falsifiable by the diner within three minutes, and only
-                // because the expectation is stated before the plate arrives.
-                (Text("Committed before tasting: expects ")
-                    + Text(hypothesis.expectedRating.rawValue).bold())
+                Text("Guessed before you taste: you'll rate it \(Text(hypothesis.expectedRating.rawValue).bold())")
                     .font(.footnote)
                     .foregroundStyle(Palette.ink)
             }
         }
     }
 
-    /// The stress test: three degenerate outputs, three treatments.
-    ///
-    /// A thin claim is demoted quietly in grey. A hallucination is a guardrail firing,
-    /// so it is amber and the sentence is struck through. A false positive from the
-    /// blunt stance filter is grey — the filter is coarse, and saying so is more honest
-    /// than hiding it.
-    private func struck(_ rejection: ClaimRejection) -> some View {
-        let isGuard = rejection.layer == .grounding
-        let tint = isGuard ? Palette.unknown : Palette.muted
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(rejection.layer.rawValue)
-                .font(.caption.weight(.semibold)).tracking(0.6)
-                .foregroundStyle(tint)
-            if rejection.layer != .thin {
-                Text(rejection.wrote)
-                    .font(.footnote.italic())
-                    .strikethrough()
-                    .foregroundStyle(tint)
-            }
-            Text(rejection.explanation)
-                .font(.footnote)
-                .foregroundStyle(isGuard ? Palette.unknown : Palette.ink)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(tint.opacity(isGuard ? 0.9 : 0.4), lineWidth: 1)
-        }
-    }
-
-    private func degraded(_ message: String) -> some View {
-        Text(message)
-            .font(.footnote)
-            .foregroundStyle(Palette.ink)
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Palette.unknown.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    private func guardBlock(_ entry: TraceEntry) -> some View {
+    private func guardBox(_ entry: TraceEntry) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(entry.title.uppercased() + " FIRED")
-                .font(.caption.weight(.semibold)).tracking(0.6)
-                .foregroundStyle(Palette.ink)
-            Text(entry.detail)
-                .font(.footnote)
-                .foregroundStyle(Palette.ink)
-            Button("SEE IT IN THE TRACE →") { model.showTrace = true }
+            SectionLabel(entry.heading, tint: Palette.ink)
+            Text(entry.guardExplanation).font(.footnote).foregroundStyle(Palette.ink)
+            Button("See why") { model.isShowingTrace = true }
                 .font(.caption.weight(.semibold))
-                .tint(Palette.accent)
-                .buttonStyle(.plain)
-                .foregroundStyle(Palette.accent)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.muted.opacity(0.5), lineWidth: 1)
-        }
+        .background(RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.muted.opacity(0.5)))
     }
 
     @ViewBuilder
-    private var objective: some View {
-        if let intent = model.intent {
+    private var goal: some View {
+        if let intent = session.intent {
             VStack(alignment: .leading, spacing: 4) {
-                Text("THIS ROUND IS FOR")
-                    .font(.caption.weight(.semibold)).tracking(0.6)
-                    .foregroundStyle(Palette.muted)
+                SectionLabel("This round is for", tint: Palette.muted)
                 Text(intent.rationale).font(.subheadline).foregroundStyle(Palette.ink)
-                Text("recon share: \(intent.reconShare.rawValue) · posture: \(intent.riskPosture.rawValue)")
+                Text("\(intent.reconShare.label) · \(intent.riskPosture.label)")
                     .font(.caption).foregroundStyle(Palette.muted)
             }
             .padding(16)
@@ -163,113 +88,153 @@ struct RoundPlanView: View {
         }
     }
 
-    private var items: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(plan?.items ?? []) { item in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(item.dishName).font(.headline).foregroundStyle(Palette.ink)
-                        Text(item.quantity == 1 ? "1 order" : "\(item.quantity) orders")
-                            .font(.caption).foregroundStyle(Palette.muted)
-                        Spacer()
-                        RoundRoleBadge(isRecon: item.isRecon)
-                    }
-                    HStack(spacing: 8) {
-                        Text(item.reason).font(.caption).foregroundStyle(Palette.muted)
-                        AttributionBadge(isDeterministic: true)
-                    }
-                }
-            }
-
-            // Held back, not hidden. Amber, because amber only ever means uncertainty.
-            ForEach(model.unknownDishes, id: \.name) { dish in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(dish.name).font(.headline).foregroundStyle(Palette.unknown)
-                        Spacer()
-                        VerdictBadge(verdict: .unknown)
-                    }
-                    Text("Ingredients not printed. Held back, not hidden.")
-                        .font(.caption).foregroundStyle(Palette.unknown)
-                    ForEach(model.openQuestions(for: dish), id: \.self) { term in
-                        HStack(spacing: 8) {
-                            Text("Contains \(term)?").font(.caption).foregroundStyle(Palette.muted)
-                            Spacer()
-                            Button("No")  { model.answer(term, contains: false, for: dish) }
-                            Button("Yes") { model.answer(term, contains: true,  for: dish) }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.mini)
-                        .tint(Palette.accent)
-                    }
-                }
-            }
-        }
-    }
-
     @ViewBuilder
-    private var footer: some View {
-        if let plan, !plan.isEmpty {
-            Divider()
-            Text(fitLine(plan))
+    private var uncheckedElsewhere: some View {
+        let planned = Set(plan?.items.map(\.dishName) ?? [])
+        let count = session.visit.map {
+            ExclusionValidator.partition($0.sightings, exclusions: session.store.exclusions())
+                .unknown.filter { !planned.contains($0.name) }.count
+        } ?? 0
+        if count > 0 {
+            Text("\(count) other dish\(count == 1 ? "" : "es") can't be checked against your avoid list. You'll be asked about one only if a round plans it.")
                 .font(.caption)
                 .foregroundStyle(Palette.muted)
         }
     }
 
-    private func fitLine(_ plan: RoundPlan) -> String {
-        let planned = plan.totalSatietyCost / CapacityEngine.platesToSatiety
-        let left = model.capacity.plateEstimate
-        var line = "Fits about \(String(format: "%.1f", planned)) plates of the \(String(format: "%.1f", left)) you have left."
-        if plan.excludedCount > 0 {
-            line += " \(plan.excludedCount) ruled out by your avoid list."
+    @ViewBuilder
+    private var footer: some View {
+        if let plan, !plan.isEmpty, let visit = session.visit {
+            let planned = (plan.totalSatietyCost / CapacityEngine.platesToSatiety).formatted(.number.precision(.fractionLength(1)))
+            let left = CapacityEngine.state(for: visit).plateEstimate.formatted(.number.precision(.fractionLength(1)))
+            Divider()
+            Text("Fits about \(planned) plates of the \(left) you have left."
+                 + (plan.excludedCount > 0 ? " \(plan.excludedCount) ruled out by your avoid list." : ""))
+                .font(.caption)
+                .foregroundStyle(Palette.muted)
         }
-        return line
     }
 
     private var actions: some View {
         VStack(spacing: 12) {
-            Button { model.acceptPlan() } label: {
+            if plan?.needsAnswers == true {
+                Text("Ask staff about the dishes marked below, then answer, to accept this round.")
+                    .font(.caption)
+                    .foregroundStyle(Palette.unknown)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Button(action: model.acceptPlan) {
                 Text("Accept").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .tint(Palette.accent)
             .controlSize(.large)
+            .disabled(plan?.needsAnswers ?? true)
+
             HStack {
-                Button("Adjust") { adjusting = true }
-                    .confirmationDialog("Adjust this round", isPresented: $adjusting, titleVisibility: .visible) {
+                Button("Adjust") { isChoosingAdjustment = true }
+                    .confirmationDialog("Adjust this round", isPresented: $isChoosingAdjustment, titleVisibility: .visible) {
                         ForEach(AdjustDirection.allCases, id: \.self) { direction in
-                            Button(direction.label) { model.adjustRound(direction) }
+                            Button(direction.label) { Task { await model.adjust(toward: direction) } }
                         }
                     }
                 Spacer()
-                // Never a warning, never a nudge, never absent.
-                Button("Stop here") { model.endSession() }
+                Button("Stop here", action: model.askToStop)
             }
             .font(.subheadline)
-            .tint(Palette.accent)
         }
         .padding(24)
         .background(Palette.surface)
     }
 }
 
-/// Capacity as filled dots. The ring is the glyph everywhere else; in a header row this
-/// is the same information at the size a glance affords.
-struct CapacityDots: View {
-    let fraction: Double
-    private let total = 3
+/// The AI's guess that wasn't shown, struck through, and why.
+private struct RejectedGuess: View {
+    let rejection: ClaimRejection
+
+    private var isGuardFiring: Bool { rejection.reason == .notOnMenu }
+    private var tint: Color { isGuardFiring ? Palette.unknown : Palette.muted }
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(0..<total, id: \.self) { index in
-                Circle()
-                    .fill(Double(index) < fraction * Double(total) ? Palette.accent : Palette.muted.opacity(0.3))
-                    .frame(width: 6, height: 6)
+        VStack(alignment: .leading, spacing: 4) {
+            SectionLabel(rejection.reason.label, tint: tint)
+            if rejection.reason != .tooVague {
+                Text(rejection.wrote).font(.footnote.italic()).strikethrough().foregroundStyle(tint)
+            }
+            Text(rejection.explanation).font(.footnote).foregroundStyle(isGuardFiring ? Palette.unknown : Palette.ink)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).strokeBorder(tint.opacity(isGuardFiring ? 0.9 : 0.4)))
+    }
+}
+
+private struct NoteBox: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.footnote)
+            .foregroundStyle(Palette.ink)
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.unknown.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+/// One planned dish: why it's here, whether the avoid list clears it, and how many orders.
+private struct PlannedDishCard: View {
+    let model: MealViewModel
+    let item: PlannedItem
+
+    private var session: MealSession { model.session }
+
+    var body: some View {
+        let sighting = session.visit?.sighting(named: item.dishName)
+        let questions = sighting.map(session.openQuestions(for:)) ?? []
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(item.dishName)
+                    .font(.headline)
+                    .foregroundStyle(questions.isEmpty ? Palette.ink : Palette.unknown)
+                Spacer()
+                RoundRoleBadge(isNew: item.isRecon)
+                if !session.store.exclusions().isEmpty {
+                    VerdictBadge(verdict: questions.isEmpty ? .safe : .unknown)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Text(item.reason).font(.caption).foregroundStyle(Palette.muted)
+                AttributionBadge(isCalculated: true)
+            }
+
+            if !questions.isEmpty {
+                Text("Ingredients not printed. Ask staff before ordering.")
+                    .font(.caption)
+                    .foregroundStyle(Palette.unknown)
+                ForEach(questions, id: \.self) { ingredient in
+                    HStack(spacing: 8) {
+                        Text("Contains \(ingredient)?").font(.caption).foregroundStyle(Palette.ink)
+                        Spacer()
+                        Button("No") { model.coordinator.answer(ingredient, contains: false, for: item.dishName) }
+                        Button("Yes") { model.coordinator.answer(ingredient, contains: true, for: item.dishName) }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+
+            Divider()
+            Stepper(value: Binding(get: { item.quantity }, set: { session.setOrders(for: item, to: $0) }),
+                    in: 1...RoundPlanner.maxOrdersPerDish) {
+                Text(item.quantity == 1 ? "1 order" : "\(item.quantity) orders")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(Palette.ink)
             }
         }
-        .accessibilityElement()
-        .accessibilityLabel("Capacity remaining")
-        .accessibilityValue("\(Int(fraction * 100)) percent")
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.raised, in: RoundedRectangle(cornerRadius: 10))
     }
 }

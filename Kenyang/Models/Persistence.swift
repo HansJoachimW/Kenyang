@@ -1,23 +1,17 @@
 import Foundation
 import SwiftData
 
+// Every stored property has a default and none is ever renamed: SwiftData reads a rename
+// as drop-plus-add, and the migration failure aborts the app at launch.
+
 @Model
 final class Restaurant: Identifiable {
     #Index<Restaurant>([\.name])
     @Attribute(.unique) var name: String
     var pricePerHead: Double = 0
     var tierNames: [String] = []
-    /// Parallel to `tierNames`. The cover price of each tier, captured when that menu is
-    /// first imported — the tier ladder is what Screen 2 argues over, and without prices
-    /// the argument is unarguable. Added with a default, never renamed.
     var tierPrices: [Double] = []
     var createdAt: Date = Date.now
-    /// Where the venue is, for the arrival trigger (§10b). Recorded from the diner's own
-    /// position when a session starts there — you are at the venue, so your location is
-    /// the venue's — and never asked for as a separate step.
-    ///
-    /// Optional with a default, per `HANDOFF.md` fact 10: a stored property added without
-    /// one makes inferred migration refuse and `makeContainer` abort at launch.
     var latitude: Double? = nil
     var longitude: Double? = nil
     @Relationship(deleteRule: .cascade, inverse: \Visit.restaurant) var visits: [Visit]
@@ -30,14 +24,12 @@ final class Restaurant: Identifiable {
         self.visits = []
     }
 
+    var id: String { name }
     var hasTierLadder: Bool { tierNames.count > 1 }
 
     func tierName(rank: Int) -> String {
         tierNames.indices.contains(rank) ? tierNames[rank] : "Tier \(rank + 1)"
     }
-
-    /// `.sheet(item:)` needs this; the venue name is already `@Attribute(.unique)`.
-    var id: String { name }
 
     func tierPrice(rank: Int) -> Double? {
         tierPrices.indices.contains(rank) ? tierPrices[rank] : nil
@@ -52,8 +44,6 @@ final class Visit {
     var pricePerHead: Double
     var declaredMaxSatiety: Double
     var outcomeRaw: String
-    /// Defaulted, because a renamed or undefaulted stored property crashes SwiftData
-    /// at launch rather than degrading — see the vocabulary-migration test.
     var endedBecauseRaw: String = MealEnding.unknown.rawValue
     var restaurant: Restaurant?
 
@@ -61,10 +51,7 @@ final class Visit {
     @Relationship(deleteRule: .cascade, inverse: \TasteEvent.visit) var tasteEvents: [TasteEvent]
     @Relationship(deleteRule: .cascade, inverse: \FullnessReading.visit) var fullnessReadings: [FullnessReading]
 
-    init(restaurant: Restaurant?,
-         pricePerHead: Double,
-         seatingLimitMinutes: Int?,
-         declaredMaxSatiety: Double) {
+    init(restaurant: Restaurant?, pricePerHead: Double, seatingLimitMinutes: Int?, declaredMaxSatiety: Double) {
         self.startedAt = .now
         self.pricePerHead = pricePerHead
         self.seatingLimitMinutes = seatingLimitMinutes
@@ -87,14 +74,23 @@ final class Visit {
     }
 
     var isActive: Bool { endedAt == nil }
-
-    var elapsedMinutes: Int {
-        Int(Date.now.timeIntervalSince(startedAt) / 60)
-    }
+    var venueName: String { restaurant?.name ?? "Kenyang" }
 
     var minutesRemaining: Int? {
         guard let limit = seatingLimitMinutes else { return nil }
-        return max(0, limit - elapsedMinutes)
+        let elapsed = Int(Date.now.timeIntervalSince(startedAt) / 60)
+        return max(0, limit - elapsed)
+    }
+
+    var roundsPlayed: Int { tasteEvents.map(\.roundIndex).max() ?? 0 }
+
+    var likedDishes: [String] {
+        let liked = tasteEvents.filter { $0.isRated && $0.rating == .good }.map(\.dishName)
+        return liked.reduce(into: []) { names, name in if !names.contains(name) { names.append(name) } }
+    }
+
+    func sighting(named name: String) -> DishSighting? {
+        sightings.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
     }
 }
 
@@ -109,34 +105,17 @@ final class DishSighting {
     var queueMinutes: Int = 0
     var ingredientsKnown: Bool = false
     var ingredients: [String] = []
-    /// Exclusion terms the diner has confirmed, for this dish, after asking staff.
-    /// Held per-term rather than as one `isSafe` flag on purpose: clearing *peanut*
-    /// says nothing about *shellfish*, and a dish cleared against today's list must go
-    /// back to `unknown` the moment a new term is added. A single boolean would fail
-    /// open in exactly that case, which is the one direction that is unrecoverable.
-    ///
-    /// Added with a default, never renamed — see the vocabulary-migration test.
+    /// Avoid-list terms the diner cleared for this dish after asking staff. Per term, so
+    /// adding a new term to the list re-opens the question.
     var clearedTerms: [String] = []
     var visit: Visit?
 
-    init(name: String,
-         category: MenuCategory,
-         printedCategory: String = "",
-         tierRank: Int = 0,
-         isTerminal: Bool? = nil,
-         queueMinutes: Int = 0,
-         ingredientsKnown: Bool = false,
-         ingredients: [String] = [],
-         clearedTerms: [String] = []) {
+    init(name: String, category: MenuCategory, printedCategory: String = "", tierRank: Int = 0) {
         self.name = name
         self.categoryRaw = category.rawValue
         self.printedCategory = printedCategory
         self.tierRank = tierRank
-        self.isTerminal = isTerminal ?? (category == .dessert)
-        self.queueMinutes = queueMinutes
-        self.ingredientsKnown = ingredientsKnown
-        self.ingredients = ingredients
-        self.clearedTerms = clearedTerms
+        self.isTerminal = category == .dessert
     }
 
     var category: MenuCategory {
@@ -147,43 +126,39 @@ final class DishSighting {
     var flavour: FlavourProfile { .prior(for: category) }
 }
 
+/// One plate eaten. Unrated plates count toward capacity but never toward value.
 @Model
 final class TasteEvent {
     var at: Date
     var dishName: String = ""
     var categoryRaw: String = MenuCategory.unknown.rawValue
     var ratingRaw: String
-    /// `false` when the diner logged *that* they ate something without saying how it
-    /// was. The satiety cost still counts — that is a capacity observation — but the
-    /// value posterior must ignore it, or a blind log fabricates a value observation,
-    /// which is worse than no observation at all (§3f, the Action Button rule).
-    /// Defaults to `true` so rows written before this existed keep their meaning.
     var isRated: Bool = true
     var portionRaw: String
     var roundIndex: Int
     var visit: Visit?
 
-    init(dishName: String,
-         category: MenuCategory,
-         rating: Rating?,
-         portion: PortionBucket,
-         roundIndex: Int) {
+    init(dishName: String, category: MenuCategory, rating: Rating?, portion: PortionBucket, roundIndex: Int) {
         self.at = .now
         self.dishName = dishName
         self.categoryRaw = category.rawValue
         self.isRated = rating != nil
-        // An unrated log still needs *a* stored value; every value read filters on
-        // `isRated`, so this one is inert.
         self.ratingRaw = (rating ?? .fine).rawValue
         self.portionRaw = portion.rawValue
         self.roundIndex = roundIndex
     }
 
     var category: MenuCategory { MenuCategory(rawValue: categoryRaw) ?? .unknown }
-    var rating: Rating { Rating(rawValue: ratingRaw) ?? .fine }
     var portion: PortionBucket { PortionBucket(rawValue: portionRaw) ?? .normal }
-
     var satietyCost: Double { portion.multiplier * category.satietyDensity }
+
+    var rating: Rating {
+        get { Rating(rawValue: ratingRaw) ?? .fine }
+        set {
+            ratingRaw = newValue.rawValue
+            isRated = true
+        }
+    }
 }
 
 @Model
@@ -211,6 +186,7 @@ final class DietaryExclusion {
     }
 }
 
+/// How one of the AI's guesses turned out, by the kind of reasoning behind it.
 @Model
 final class BasisRecord {
     var basisRaw: String

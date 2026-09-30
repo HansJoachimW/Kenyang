@@ -20,6 +20,13 @@
 			remoteGlobalIDString = 902EBF8F305CEA41006A5AC2;
 			remoteInfo = KenyangWidgetsExtension;
 		};
+		A1B2C3D4E5F6000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 90C25BA130496E9900A06430 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 90C25BA830496E9900A06430;
+			remoteInfo = Kenyang;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -41,6 +48,7 @@
 		902EBF92305CEA41006A5AC2 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		902EBF94305CEA41006A5AC2 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		90C25BA930496E9900A06430 /* Kenyang.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kenyang.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D4E5F6000000000002 /* KenyangTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KenyangTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -79,6 +87,11 @@
 			path = Kenyang;
 			sourceTree = "<group>";
 		};
+		A1B2C3D4E5F6000000000003 /* KenyangTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = KenyangTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -92,6 +105,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		90C25BA630496E9900A06430 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C3D4E5F6000000000004 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -115,6 +135,7 @@
 			children = (
 				90C25BAB30496E9900A06430 /* Kenyang */,
 				902EBF96305CEA41006A5AC2 /* KenyangWidgets */,
+				A1B2C3D4E5F6000000000003 /* KenyangTests */,
 				902EBF91305CEA41006A5AC2 /* Frameworks */,
 				90C25BAA30496E9900A06430 /* Products */,
 			);
@@ -125,6 +146,7 @@
 			children = (
 				90C25BA930496E9900A06430 /* Kenyang.app */,
 				902EBF90305CEA41006A5AC2 /* KenyangWidgetsExtension.appex */,
+				A1B2C3D4E5F6000000000002 /* KenyangTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -178,6 +200,29 @@
 			productReference = 90C25BA930496E9900A06430 /* Kenyang.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A1B2C3D4E5F6000000000007 /* KenyangTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1B2C3D4E5F6000000000011 /* Build configuration list for PBXNativeTarget "KenyangTests" */;
+			buildPhases = (
+				A1B2C3D4E5F6000000000006 /* Sources */,
+				A1B2C3D4E5F6000000000004 /* Frameworks */,
+				A1B2C3D4E5F6000000000005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A1B2C3D4E5F6000000000008 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A1B2C3D4E5F6000000000003 /* KenyangTests */,
+			);
+			name = KenyangTests;
+			packageProductDependencies = (
+			);
+			productName = KenyangTests;
+			productReference = A1B2C3D4E5F6000000000002 /* KenyangTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -193,6 +238,10 @@
 					};
 					90C25BA830496E9900A06430 = {
 						CreatedOnToolsVersion = 26.6;
+					};
+					A1B2C3D4E5F6000000000007 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = 90C25BA830496E9900A06430;
 					};
 				};
 			};
@@ -212,6 +261,7 @@
 			targets = (
 				90C25BA830496E9900A06430 /* Kenyang */,
 				902EBF8F305CEA41006A5AC2 /* KenyangWidgetsExtension */,
+				A1B2C3D4E5F6000000000007 /* KenyangTests */,
 			);
 		};
 /* End PBXProject section */
@@ -225,6 +275,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		90C25BA730496E9900A06430 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C3D4E5F6000000000005 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -248,6 +305,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1B2C3D4E5F6000000000006 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -255,6 +319,11 @@
 			isa = PBXTargetDependency;
 			target = 902EBF8F305CEA41006A5AC2 /* KenyangWidgetsExtension */;
 			targetProxy = 902EBFA2305CEA42006A5AC2 /* PBXContainerItemProxy */;
+		};
+		A1B2C3D4E5F6000000000008 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 90C25BA830496E9900A06430 /* Kenyang */;
+			targetProxy = A1B2C3D4E5F6000000000001 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -451,14 +520,14 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Kenyang.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				INFOPLIST_FILE = "Kenyang-Info.plist";
-				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Kenyang checks for a booking at a buffet you have eaten at, so it can weigh in on the tier before you order.";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Kenyang notices when you arrive at a buffet you have eaten at, so it can weigh in on the tier before you order. It stays quiet unless it has something earned to say.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Kenyang records where a buffet is the first time you eat there, so it can recognise your arrival next time.";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = NDGX4SV6M6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Kenyang-Info.plist";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Kenyang checks for a booking at a buffet you have eaten at, so it can weigh in on the tier before you order.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Kenyang notices when you arrive at a buffet you have eaten at, so it can weigh in on the tier before you order. It stays quiet unless it has something earned to say.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Kenyang records where a buffet is the first time you eat there, so it can recognise your arrival next time.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -489,14 +558,14 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Kenyang.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				INFOPLIST_FILE = "Kenyang-Info.plist";
-				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Kenyang checks for a booking at a buffet you have eaten at, so it can weigh in on the tier before you order.";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Kenyang notices when you arrive at a buffet you have eaten at, so it can weigh in on the tier before you order. It stays quiet unless it has something earned to say.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Kenyang records where a buffet is the first time you eat there, so it can recognise your arrival next time.";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = NDGX4SV6M6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Kenyang-Info.plist";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Kenyang checks for a booking at a buffet you have eaten at, so it can weigh in on the tier before you order.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Kenyang notices when you arrive at a buffet you have eaten at, so it can weigh in on the tier before you order. It stays quiet unless it has something earned to say.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Kenyang records where a buffet is the first time you eat there, so it can recognise your arrival next time.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -517,6 +586,50 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A1B2C3D4E5F6000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NDGX4SV6M6;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hansjoachim.KenyangTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Kenyang.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Kenyang";
+			};
+			name = Debug;
+		};
+		A1B2C3D4E5F6000000000010 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NDGX4SV6M6;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hansjoachim.KenyangTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Kenyang.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Kenyang";
 			};
 			name = Release;
 		};
@@ -546,6 +659,15 @@
 			buildConfigurations = (
 				90C25BB730496E9900A06430 /* Debug */,
 				90C25BB830496E9900A06430 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1B2C3D4E5F6000000000011 /* Build configuration list for PBXNativeTarget "KenyangTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B2C3D4E5F6000000000009 /* Debug */,
+				A1B2C3D4E5F6000000000010 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

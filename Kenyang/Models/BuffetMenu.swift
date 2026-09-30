@@ -1,92 +1,87 @@
 import Foundation
 
-/// The menu a session starts from.
-///
-/// Every start path reads `.default`: the start screen, the home-screen widget, Siri and
-/// the tier screen. The menu is printed and fixed per venue, so it is data, not something
-/// asked for at the table.
 struct BuffetMenu: Sendable {
-    typealias Item = (name: String, category: MenuCategory, printed: String, tier: Int)
+    struct Dish: Sendable {
+        let name: String
+        let category: MenuCategory
+        let section: String
+        var tier = 0
+    }
 
     let venueName: String
     let tierName: String
-    /// Rupiah per adult head, before tax and service.
     let pricePerHead: Double
-    /// Printed on the menu as "Table 90 minutes".
     let seatingMinutes: Int
-    let items: [Item]
+    let dishes: [Dish]
 
-    /// Gyu-Kaku Standard Buffet, from the printed menu.
-    ///
-    /// Left out on purpose: the paid toppings (Negi, Mix Cheese), because a price inside
-    /// the meal is a reason to spend, and the single kimchi and namuru plates, which are
-    /// the parts of Kimuchi Trio, Assorted Kimuchi and Assorted Namuru listed again.
+    /// Gyu-Kaku Standard Buffet. Paid toppings are left out, so no price appears during
+    /// the meal, and so are the single kimchi and namuru plates the assorted plates repeat.
     static let `default` = BuffetMenu(
         venueName: "Gyu-Kaku",
         tierName: "Standard",
         pricePerHead: 248_800,
         seatingMinutes: 90,
-        items: [
-            ("Beef Curry Pan", .fried, "APPETIZER & AGEMONO", 0),
-            ("Beef Takoyaki", .fried, "APPETIZER & AGEMONO", 0),
-            ("Juicy Beef Stew", .soup, "APPETIZER & AGEMONO", 0),
-            ("Corn Pop Shake", .fried, "APPETIZER & AGEMONO", 0),
-            ("Potato Salad", .vegetable, "APPETIZER & AGEMONO", 0),
-            ("Crispy Nori Ten", .fried, "APPETIZER & AGEMONO", 0),
-            ("Calamari with Tar Tar Sauce", .fried, "APPETIZER & AGEMONO", 0),
-            ("Chicken Karaage", .fried, "APPETIZER & AGEMONO", 0),
-            ("French Fries", .fried, "APPETIZER & AGEMONO", 0),
-            ("Mini Sausage Stick", .fried, "APPETIZER & AGEMONO", 0),
-            ("Kimuchi Trio", .vegetable, "APPETIZER & AGEMONO", 0),
-            ("Assorted Kimuchi", .vegetable, "APPETIZER & AGEMONO", 0),
-            ("Assorted Namuru", .vegetable, "APPETIZER & AGEMONO", 0),
-            ("Gyu-Kaku Cabbage", .vegetable, "APPETIZER & AGEMONO", 0),
-            ("Edamame", .vegetable, "APPETIZER & AGEMONO", 0),
+        dishes: [
+            Dish(name: "Beef Curry Pan", category: .fried, section: "APPETIZER & AGEMONO"),
+            Dish(name: "Beef Takoyaki", category: .fried, section: "APPETIZER & AGEMONO"),
+            Dish(name: "Juicy Beef Stew", category: .soup, section: "APPETIZER & AGEMONO"),
+            Dish(name: "Corn Pop Shake", category: .fried, section: "APPETIZER & AGEMONO"),
+            Dish(name: "Potato Salad", category: .vegetable, section: "APPETIZER & AGEMONO"),
+            Dish(name: "Crispy Nori Ten", category: .fried, section: "APPETIZER & AGEMONO"),
+            Dish(name: "Calamari with Tar Tar Sauce", category: .fried, section: "APPETIZER & AGEMONO"),
+            Dish(name: "Chicken Karaage", category: .fried, section: "APPETIZER & AGEMONO"),
+            Dish(name: "French Fries", category: .fried, section: "APPETIZER & AGEMONO"),
+            Dish(name: "Mini Sausage Stick", category: .fried, section: "APPETIZER & AGEMONO"),
+            Dish(name: "Kimuchi Trio", category: .vegetable, section: "APPETIZER & AGEMONO"),
+            Dish(name: "Assorted Kimuchi", category: .vegetable, section: "APPETIZER & AGEMONO"),
+            Dish(name: "Assorted Namuru", category: .vegetable, section: "APPETIZER & AGEMONO"),
+            Dish(name: "Gyu-Kaku Cabbage", category: .vegetable, section: "APPETIZER & AGEMONO"),
+            Dish(name: "Edamame", category: .vegetable, section: "APPETIZER & AGEMONO"),
 
-            ("Umakara Miso Harami", .meat, "STANDARD MEAT", 0),
-            ("Diced Garlic Miso Steak", .meat, "STANDARD MEAT", 0),
-            ("Dragon Karubi", .meat, "STANDARD MEAT", 0),
-            ("Garlic Miso Diamond Harami", .meat, "STANDARD MEAT", 0),
-            ("Diced Garlic Butter Steak", .meat, "STANDARD MEAT", 0),
-            ("Juicy Beef Pot", .meat, "STANDARD MEAT", 0),
-            ("Suki Shabu", .meat, "STANDARD MEAT", 0),
-            ("Spicy Suki Shabu", .meat, "STANDARD MEAT", 0),
-            ("Karubi", .meat, "STANDARD MEAT", 0),
-            ("Teriyaki Chicken", .meat, "STANDARD MEAT", 0),
-            ("Spicy Coriander Sauce Chicken", .meat, "STANDARD MEAT", 0),
+            Dish(name: "Umakara Miso Harami", category: .meat, section: "STANDARD MEAT"),
+            Dish(name: "Diced Garlic Miso Steak", category: .meat, section: "STANDARD MEAT"),
+            Dish(name: "Dragon Karubi", category: .meat, section: "STANDARD MEAT"),
+            Dish(name: "Garlic Miso Diamond Harami", category: .meat, section: "STANDARD MEAT"),
+            Dish(name: "Diced Garlic Butter Steak", category: .meat, section: "STANDARD MEAT"),
+            Dish(name: "Juicy Beef Pot", category: .meat, section: "STANDARD MEAT"),
+            Dish(name: "Suki Shabu", category: .meat, section: "STANDARD MEAT"),
+            Dish(name: "Spicy Suki Shabu", category: .meat, section: "STANDARD MEAT"),
+            Dish(name: "Karubi", category: .meat, section: "STANDARD MEAT"),
+            Dish(name: "Teriyaki Chicken", category: .meat, section: "STANDARD MEAT"),
+            Dish(name: "Spicy Coriander Sauce Chicken", category: .meat, section: "STANDARD MEAT"),
 
-            ("Gyu-Kaku Homemade Curry", .soup, "GRILL APPETIZER", 0),
-            ("Squid on a Stick", .meat, "GRILL APPETIZER", 0),
-            ("Squid with Spicy Coriander Sauce", .meat, "GRILL APPETIZER", 0),
-            ("Beef Cheese Sausage", .meat, "GRILL APPETIZER", 0),
-            ("Garlic Butter Foil", .vegetable, "GRILL APPETIZER", 0),
-            ("Corn Foil", .vegetable, "GRILL APPETIZER", 0),
-            ("Assorted Vegetables", .vegetable, "GRILL APPETIZER", 0),
+            Dish(name: "Gyu-Kaku Homemade Curry", category: .soup, section: "GRILL APPETIZER"),
+            Dish(name: "Squid on a Stick", category: .meat, section: "GRILL APPETIZER"),
+            Dish(name: "Squid with Spicy Coriander Sauce", category: .meat, section: "GRILL APPETIZER"),
+            Dish(name: "Beef Cheese Sausage", category: .meat, section: "GRILL APPETIZER"),
+            Dish(name: "Garlic Butter Foil", category: .vegetable, section: "GRILL APPETIZER"),
+            Dish(name: "Corn Foil", category: .vegetable, section: "GRILL APPETIZER"),
+            Dish(name: "Assorted Vegetables", category: .vegetable, section: "GRILL APPETIZER"),
 
-            ("Veggie Wrap", .vegetable, "SALAD", 0),
-            ("Wakame Salad", .vegetable, "SALAD", 0),
-            ("Mini Caesar Salad", .vegetable, "SALAD", 0),
+            Dish(name: "Veggie Wrap", category: .vegetable, section: "SALAD"),
+            Dish(name: "Wakame Salad", category: .vegetable, section: "SALAD"),
+            Dish(name: "Mini Caesar Salad", category: .vegetable, section: "SALAD"),
 
-            ("Seafood Tacos", .raw, "SUSHI", 0),
-            ("Aburi Salmon Roll", .raw, "SUSHI", 0),
-            ("Unagi Roll", .raw, "SUSHI", 0),
+            Dish(name: "Seafood Tacos", category: .raw, section: "SUSHI"),
+            Dish(name: "Aburi Salmon Roll", category: .raw, section: "SUSHI"),
+            Dish(name: "Unagi Roll", category: .raw, section: "SUSHI"),
 
-            ("Spicy Seafood Jjampong", .starch, "RICE & NOODLE", 0),
-            ("Bibimbab", .starch, "RICE & NOODLE", 0),
-            ("Garlic Fried Rice", .starch, "RICE & NOODLE", 0),
-            ("Gyu-Kaku Rice", .starch, "RICE & NOODLE", 0),
-            ("Steamed Rice", .starch, "RICE & NOODLE", 0),
-            ("Gomanegi Ramen", .starch, "RICE & NOODLE", 0),
+            Dish(name: "Spicy Seafood Jjampong", category: .starch, section: "RICE & NOODLE"),
+            Dish(name: "Bibimbab", category: .starch, section: "RICE & NOODLE"),
+            Dish(name: "Garlic Fried Rice", category: .starch, section: "RICE & NOODLE"),
+            Dish(name: "Gyu-Kaku Rice", category: .starch, section: "RICE & NOODLE"),
+            Dish(name: "Steamed Rice", category: .starch, section: "RICE & NOODLE"),
+            Dish(name: "Gomanegi Ramen", category: .starch, section: "RICE & NOODLE"),
 
-            ("Miso Soup", .soup, "SOUP", 0),
-            ("Wakame Soup", .soup, "SOUP", 0),
-            ("Egg Soup", .soup, "SOUP", 0),
+            Dish(name: "Miso Soup", category: .soup, section: "SOUP"),
+            Dish(name: "Wakame Soup", category: .soup, section: "SOUP"),
+            Dish(name: "Egg Soup", category: .soup, section: "SOUP"),
 
-            ("Fizzy Popping Yogurt Ice Cream", .dessert, "DESSERT", 0),
-            ("Gyu-Kaku Milk Pudding", .dessert, "DESSERT", 0),
-            ("Ice Cream on Milk Pudding", .dessert, "DESSERT", 0),
-            ("Gyu-Kaku Ice Cream", .dessert, "DESSERT", 0),
-            ("Fruits", .dessert, "DESSERT", 0)
+            Dish(name: "Fizzy Popping Yogurt Ice Cream", category: .dessert, section: "DESSERT"),
+            Dish(name: "Gyu-Kaku Milk Pudding", category: .dessert, section: "DESSERT"),
+            Dish(name: "Ice Cream on Milk Pudding", category: .dessert, section: "DESSERT"),
+            Dish(name: "Gyu-Kaku Ice Cream", category: .dessert, section: "DESSERT"),
+            Dish(name: "Fruits", category: .dessert, section: "DESSERT")
         ]
     )
 }

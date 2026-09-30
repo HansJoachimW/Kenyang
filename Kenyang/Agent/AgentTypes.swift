@@ -42,6 +42,11 @@ struct RoundIntent: Sendable {
         aggressive — accept a poor plate for the chance of a great one.
         """)
     var riskPosture: Posture
+
+    static let balanced = RoundIntent(rationale: PlannerObjective.balanced.rationale,
+                                      reconShare: PlannerObjective.balanced.reconShare,
+                                      learnAbout: [],
+                                      riskPosture: PlannerObjective.balanced.posture)
 }
 
 @Generable
@@ -57,61 +62,80 @@ struct RoundDecision: Sendable {
     var move: RoundMove
 }
 
-@Generable
-struct CategoryReading: Sendable {
-    @Guide(description: "The menu category this item belongs to, or unknown if the name does not make it clear")
-    var category: MenuCategory
-    var confidence: ConfidenceBand
-}
-
 enum TraceKind: String, Sendable {
-    case hypothesis, intent, toolCall, verdict, decision, guardrail, plan, stop, decline
-    case modelFailure
+    case hypothesis, intent, toolCall, verdict, decision, guardrail, plan, stop, decline, modelFailure
 }
 
-/// A guardrail rejecting the model's move, in the three parts the trace shows in
-/// reading order: what the model wrote, what it then chose, and what the guard did.
-///
-/// Held as structure rather than a sentence because the rejected move is rendered
-/// **struck through rather than hidden** — the diner can see the app disagreeing with
-/// its own model, and that is the whole point of the row.
+/// A guard overruling the AI: what it wrote, what it chose, and what was done instead.
 struct GuardOverride: Sendable, Equatable {
-    /// The model's own stated reason, quoted.
     let wrote: String
-    /// The move it chose, which was rejected.
-    let chose: String
-    /// The move that was taken instead.
-    let forced: String
+    let chose: RoundMove
+    let forced: RoundMove
     let guardName: String
-    let layer: Int
     let did: String
 }
 
 struct TraceEntry: Identifiable, Sendable {
     let id = UUID()
-    let at: Date
+    let at = Date.now
     let kind: TraceKind
     let title: String
     let detail: String
-    let isDeterministic: Bool
-    /// Present only on the rows where a guard rejected the model. `exploit` is chosen
-    /// ~92% of the time, so these rows are where the branching the diner sees actually
-    /// comes from — which makes this the one entry worth a fill, a border and a
-    /// three-part layout.
-    let override: GuardOverride?
+    /// Calculated by the app rather than written by the AI.
+    let isCalculated: Bool
+    var override: GuardOverride?
 
-    init(kind: TraceKind,
-         title: String,
-         detail: String,
-         isDeterministic: Bool,
-         override: GuardOverride? = nil) {
-        self.at = .now
-        self.kind = kind
-        self.title = title
-        self.detail = detail
-        self.isDeterministic = isDeterministic
-        self.override = override
+    /// The row's heading in plain words; `title` keeps the name the code and model use.
+    var heading: String {
+        switch title {
+        case "hypothesis":                    "The guess"
+        case "roundIntent":                   "The goal for this round"
+        case "plan":                          "The plan"
+        case "plan (adjusted)":               "The plan, adjusted"
+        case "plan (degraded)":               "A plan without the AI"
+        case "exploit":                       "Stayed with the guess"
+        case "pivot":                         "Changed course"
+        case "tools":                         "What was checked"
+        case "retry":                         "Asked the AI again"
+        case "availability":                  "Apple Intelligence"
+        case "model tier":                    "AI features on this iPhone"
+        case "loop budget":                   "Out of time or attempts"
+        case "context overflow":              "The AI ran out of room"
+        case "hypothesise failed", "setIntent failed", "decide failed":
+                                              "The AI's answer couldn't be read"
+        case "Consistency guard overrode the model", "Verdict guard overrode the model":
+                                              "Kenyang overruled the AI"
+        case "pivot guard":                   "Kenyang changed course"
+        case "adjust guard":                  "Kenyang moved the plan your way"
+        case "untestable category":           "A guess that couldn't be tested"
+        case "skipped to priors":             "You skipped the AI"
+        case "adjust requested":              "You asked for a different plan"
+        case "exclusion resolved":            "You answered an ingredient question"
+        case "dish removed":                  "A dish came off the plan"
+        case "re-planned":                    "Planned again"
+        case "orders changed":                "You changed an order count"
+        case "decline overridden":            "You asked for a plan anyway"
+        case "stop overridden":               "You kept going"
+        case "passed":                        "You skipped a dish"
+        case "fullness":                      "You said how full you are"
+        case "rateDish":                      "You rated a dish"
+        case "evaluateHypothesis":            "Tested the guess"
+        case "recommendStop":                 "Time to stop"
+        case "declineToOptimise":             "No plan needed"
+        default:                              title.prefix(1).uppercased() + title.dropFirst()
+        }
     }
+
+    /// What a guard did, in the diner's words, for the plan screen.
+    var guardExplanation: String {
+        let name = title.lowercased()
+        if name.contains("adjust") { return "The AI didn't change the plan the way you asked, so Kenyang did." }
+        if name.contains("pivot") { return "Your ratings didn't back the guess, so this round tries somewhere else." }
+        return "The AI's reasoning didn't match what it chose, so Kenyang followed your ratings."
+    }
+
+    /// The AI's own sentences are worth reading at a glance; the rest is the record.
+    var isWorthShowingInFull: Bool { kind == .hypothesis || kind == .intent }
 }
 
 @MainActor
@@ -119,22 +143,19 @@ struct TraceEntry: Identifiable, Sendable {
 final class TraceLog {
     private(set) var entries: [TraceEntry] = []
 
-    func record(_ entry: TraceEntry) { entries.append(entry) }
-
-    func record(kind: TraceKind,
-                title: String,
-                detail: String,
-                deterministic: Bool,
-                override: GuardOverride? = nil) {
+    func record(_ kind: TraceKind, _ title: String, _ detail: String,
+                calculated: Bool = true, override: GuardOverride? = nil) {
         entries.append(TraceEntry(kind: kind, title: title, detail: detail,
-                                  isDeterministic: deterministic, override: override))
+                                  isCalculated: calculated, override: override))
     }
 
     func clear() { entries.removeAll() }
 
-    var pathSignature: String {
-        entries.filter { $0.kind == .decision || $0.kind == .stop || $0.kind == .decline }
-            .map(\.title)
-            .joined(separator: "→")
+    var lastGuard: TraceEntry? {
+        entries.last { $0.kind == .guardrail && $0.title.localizedCaseInsensitiveContains("guard") }
+    }
+
+    var changedCourse: Bool {
+        entries.contains { $0.kind == .decision && $0.title == RoundMove.pivot.rawValue }
     }
 }

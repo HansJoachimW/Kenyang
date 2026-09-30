@@ -2,12 +2,8 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-/// The home-screen and lock-screen widget family, off the same capacity ring.
-///
-/// The home-screen sizes start and end a meal, without opening the app. They never log
-/// food: every log in this app runs the stop check, and a widget tap that logged food
-/// without one would route around the guardrail that exists because the model would not
-/// choose to stop. Tapping anywhere else opens the app.
+/// Room left in the meal. The home-screen sizes also start and end a meal without
+/// opening the app; they never log food, because every log runs the stop check.
 struct CapacityWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "KenyangCapacity", provider: SnapshotProvider()) { entry in
@@ -35,9 +31,7 @@ struct SnapshotProvider: TimelineProvider {
         completion(SnapshotEntry(date: .now, snapshot: MealSnapshotStore.read() ?? .placeholder))
     }
 
-    /// One entry, never a schedule. Capacity only changes when the diner logs something,
-    /// and the app reloads the timeline when it does — a widget that refreshed on a
-    /// clock would be inventing movement the meal has not made.
+    /// The app reloads the timeline whenever the meal changes.
     func getTimeline(in context: Context, completion: @escaping (Timeline<SnapshotEntry>) -> Void) {
         let entry = SnapshotEntry(date: .now, snapshot: MealSnapshotStore.read() ?? .placeholder)
         completion(Timeline(entries: [entry], policy: .never))
@@ -61,7 +55,7 @@ struct CapacityWidgetView: View {
                 Text(snapshot.venueName).font(.headline).lineLimit(1)
                 Text(snapshot.isActive ? "\(snapshot.platesText) left" : "No meal in progress")
                     .font(.caption)
-                if let target = snapshot.nextTarget {
+                if let target = snapshot.nextDish {
                     Text("Next: \(target)").font(.caption2).lineLimit(1)
                 }
             }
@@ -72,7 +66,7 @@ struct CapacityWidgetView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(snapshot.venueName).font(.headline).lineLimit(1)
                     Text(detail).font(.subheadline).foregroundStyle(Palette.muted)
-                    if let target = snapshot.nextTarget {
+                    if let target = snapshot.nextDish {
                         Text("Next: \(target)").font(.caption).lineLimit(1)
                     }
                     Spacer(minLength: 0)
@@ -92,21 +86,13 @@ struct CapacityWidgetView: View {
         }
     }
 
-    /// Start when no meal is running, End while one is. End records the ending as
-    /// unknown, the same as the Live Activity's Stop: one tap cannot say why the meal
-    /// ended, and only a `fullness` ending may count as a capacity reading.
-    @ViewBuilder
+    /// Ending from here can't say why the meal ended, so it is recorded as unknown.
     private var mealButton: some View {
-        Group {
-            if snapshot.isActive {
-                Button(intent: StopFromActivityIntent()) { Text("End meal") }
-            } else {
-                Button(intent: StartMealFromWidgetIntent()) { Text("Start meal") }
-            }
-        }
-        .buttonStyle(.bordered)
-        .tint(Palette.accent)
-        .font(.caption.weight(.medium))
+        let action: MealAction = snapshot.isActive ? .endMeal : .startMeal
+        return Button(action.label, intent: MealButtonIntent(action))
+            .buttonStyle(.bordered)
+            .tint(Palette.accent)
+            .font(.caption.weight(.medium))
     }
 
     private func ring(size: CGFloat) -> some View {
@@ -116,7 +102,7 @@ struct CapacityWidgetView: View {
     }
 
     private var detail: String {
-        snapshot.isActive ? "\(snapshot.platesText) left · round \(snapshot.roundIndex)"
+        snapshot.isActive ? "\(snapshot.platesText) left · round \(snapshot.round)"
                           : "No meal in progress"
     }
 }

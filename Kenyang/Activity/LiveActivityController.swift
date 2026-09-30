@@ -1,139 +1,93 @@
 import ActivityKit
 import Foundation
 
-/// Starts, updates and ends the round's Live Activity.
-///
-/// The derivation is split out into `state(for:)` so it can be checked without
-/// ActivityKit, a device, or a widget extension — the mapping from meal state to what
-/// the Island shows is the part that can be wrong, and it is pure.
+/// Mirrors the meal onto the Live Activity and the home-screen widget. It never drives
+/// the meal; every change reaches it through `MealSession.publish()`.
 @MainActor
-final class LiveActivityController {
+final class LiveActivityController: MealDisplay {
     static let shared = LiveActivityController()
 
-    /// Asked of ActivityKit rather than remembered. A relaunch lost the remembered one
-    /// while the activity itself stayed up, so nothing could end it and the next
-    /// `syncActivity` started a second.
+    private init() {}
+
+    /// Looked up rather than remembered, so an activity started before a relaunch can
+    /// still be updated and ended.
     private var activity: Activity<RoundActivityAttributes>? {
         Activity<RoundActivityAttributes>.activities.first {
             $0.activityState == .active || $0.activityState == .stale
         }
     }
 
-    private init() {}
-
-    var isRunning: Bool { activity != nil }
-
-    /// `areActivitiesEnabled` is false when the diner has switched Live Activities off
-    /// for the app. That is a setting, not an error: the meal carries on and nothing
-    /// else in the app depends on the activity existing.
-    var isPermitted: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
-
-    func start(venue: String, state: RoundActivityAttributes.ContentState) {
-        guard isPermitted, activity == nil else { return }
-        _ = try? Activity.request(
-            attributes: RoundActivityAttributes(venueName: venue),
-            content: ActivityContent(state: state, staleDate: nil)
-        )
+    func show(_ session: MealSession) {
+        guard let visit = session.visit else { return }
+        let content = Self.content(for: session, visit: visit)
+        if let activity {
+            Task { await activity.update(ActivityContent(state: content, staleDate: nil)) }
+        } else if ActivityAuthorizationInfo().areActivitiesEnabled {
+            _ = try? Activity.request(attributes: RoundActivityAttributes(venueName: visit.venueName),
+                                      content: ActivityContent(state: content, staleDate: nil))
+        }
+        publishSnapshot(of: visit, content: content)
     }
 
-    func update(_ state: RoundActivityAttributes.ContentState) {
-        guard let activity else { return }
-        Task { await activity.update(ActivityContent(state: state, staleDate: nil)) }
+    func clear(endedVisit visit: Visit, round: Int) {
+        endAllActivities()
+        let capacity = CapacityEngine.state(for: visit)
+        publishSnapshot(of: visit, content: .init(phase: .timeToStop,
+                                                  fractionRemaining: capacity.fractionRemaining,
+                                                  plateEstimate: capacity.plateEstimate,
+                                                  round: round))
     }
 
-    /// Every activity goes, not only the newest, and **immediately**: the activity is
-    /// for a meal in progress. `.default` kept an ended meal on the Lock Screen for up
-    /// to four hours.
-    func end() {
+    /// Dismissed immediately; the default policy would leave an ended meal on the Lock
+    /// Screen for up to four hours.
+    func endAllActivities() {
         for activity in Activity<RoundActivityAttributes>.activities {
             Task { await activity.end(nil, dismissalPolicy: .immediate) }
         }
     }
 
-    /// The meal is over: take the activity down and tell the widget. Call after
-    /// `endVisit`, so the snapshot records `isActive: false`. The widget does not
-    /// dismiss itself, and without the snapshot it would keep showing the ended meal.
-    func finish(visit: Visit, roundIndex: Int) {
-        end()
-        let ended = Self.state(phase: .stopGuard,
-                               capacity: CapacityEngine.state(for: visit),
-                               minutesRemaining: visit.minutesRemaining,
-                               roundIndex: roundIndex,
-                               nextTarget: nil,
-                               message: "Meal ended.")
-        publishSnapshot(visit: visit, state: ended)
-    }
+    // MARK: - What to show
 
-    /// Recompute from the store alone. The view model owns the richer version; this is
-    /// the one a Live Activity button can reach, because a background launch for an
-    /// intent has no view model and no scene.
-    func refresh(visit: Visit, store: KenyangStore) {
+    static func content(for session: MealSession, visit: Visit) -> RoundActivityAttributes.ContentState {
         let capacity = CapacityEngine.state(for: visit)
-        let state = Self.state(
-            phase: Self.phase(capacity: capacity,
-                              minutesRemaining: visit.minutesRemaining,
-                              isDegraded: false,
-                              isEating: visit.outcome == .running),
-            capacity: capacity,
-            minutesRemaining: visit.minutesRemaining,
-            roundIndex: store.currentRound(in: visit),
-            nextTarget: store.lastPlan.flatMap { store.nextUnloggedItem(in: $0, visit: visit)?.item.dishName },
-            message: nil
-        )
-        update(state)
-        publishSnapshot(visit: visit, state: state)
-    }
+        let stopReason = StopGuard.reason(capacity: capacity, minutesRemaining: visit.minutesRemaining)
+        let hasSuggestion = !session.isEating && session.plan.map { !$0.isEmpty } == true
+        let next = session.isEating ? session.nextDish()?.item.dishName : nil
+        let phase = phase(isStopping: stopReason != .none,
+                          hasSuggestion: hasSuggestion,
+                          isEating: session.isEating,
+                          hasNextDish: next != nil)
 
-    /// The home-screen widget reads a snapshot, not the store — see `MealSnapshot`.
-    func publishSnapshot(visit: Visit, state: RoundActivityAttributes.ContentState) {
-        MealSnapshotStore.write(
-            MealSnapshot(venueName: visit.restaurant?.name ?? "Kenyang",
-                         fractionRemaining: state.fractionRemaining,
-                         plateEstimate: state.plateEstimate,
-                         roundIndex: state.roundIndex,
-                         nextTarget: state.nextTarget,
-                         isActive: visit.isActive,
-                         updatedAt: .now)
-        )
-    }
-
-    // MARK: - The derivation
-
-    /// Everything the four states and three presentations render from, in one place.
-    ///
-    /// `nextTarget` is the same "first unlogged item in plan order" rule the Action
-    /// Button presses, so the Island names the dish the button would log. If those two
-    /// ever disagree the diner is being told one thing and handed another.
-    static func state(phase: RoundActivityAttributes.Phase,
-                      capacity: CapacityState,
-                      minutesRemaining: Int?,
-                      roundIndex: Int,
-                      nextTarget: String?,
-                      message: String?) -> RoundActivityAttributes.ContentState {
-        RoundActivityAttributes.ContentState(
+        var content = RoundActivityAttributes.ContentState(
             phase: phase,
             fractionRemaining: capacity.fractionRemaining,
             plateEstimate: capacity.plateEstimate,
-            // Under fifteen minutes is the last-order threshold StopGuard uses. Above
-            // it the countdown is noise the diner can do nothing with, so it is not
-            // shown at all rather than shown and ignored.
-            minutesToLastOrder: minutesRemaining.flatMap { $0 <= 15 ? $0 : nil },
-            roundIndex: roundIndex,
-            nextTarget: nextTarget,
-            message: message
-        )
+            minutesToLastOrder: visit.minutesRemaining.flatMap { $0 <= StopGuard.lastOrderMinutes ? $0 : nil },
+            round: session.round,
+            nextDish: next,
+            message: phase == .timeToStop ? StopGuard.message(for: stopReason) : session.note)
+        if phase == .suggested, let plan = session.plan {
+            content.suggestion = plan.items.map(\.orderLabel)
+            content.question = session.firstOpenQuestion().map { .init(dish: $0.dish, ingredient: $0.ingredient) }
+        }
+        return content
     }
 
-    /// The phase the meal is actually in, computed rather than passed around, so the
-    /// stop guard reaches the Island by the same route it reaches every other surface.
-    static func phase(capacity: CapacityState,
-                      minutesRemaining: Int?,
-                      isDegraded: Bool,
-                      isEating: Bool) -> RoundActivityAttributes.Phase {
-        if StopGuard.shouldStop(capacity: capacity, minutesRemaining: minutesRemaining) {
-            return .stopGuard
-        }
-        if isDegraded { return .degraded }
-        return isEating ? .active : .planning
+    static func phase(isStopping: Bool, hasSuggestion: Bool, isEating: Bool,
+                      hasNextDish: Bool) -> RoundActivityAttributes.Phase {
+        if isStopping { return .timeToStop }
+        if hasSuggestion { return .suggested }
+        if isEating { return hasNextDish ? .eating : .roundDone }
+        return .planning
+    }
+
+    private func publishSnapshot(of visit: Visit, content: RoundActivityAttributes.ContentState) {
+        MealSnapshotStore.write(MealSnapshot(venueName: visit.venueName,
+                                             fractionRemaining: content.fractionRemaining,
+                                             plateEstimate: content.plateEstimate,
+                                             round: content.round,
+                                             nextDish: content.nextDish,
+                                             isActive: visit.isActive,
+                                             updatedAt: .now))
     }
 }

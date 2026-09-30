@@ -74,13 +74,31 @@ enum PortionBucket: String, Codable, CaseIterable, Sendable {
 @Generable
 enum ValueBasis: String, Codable, CaseIterable, Sendable {
     case tierExclusivity, costDensity, preparation, preference
+
+    var label: String {
+        switch self {
+        case .tierExclusivity: "only on this tier"
+        case .costDensity:     "most value for the room it takes"
+        case .preparation:     "how it's made"
+        case .preference:      "what you've liked"
+        }
+    }
 }
 
 @Generable
 enum ConfidenceBand: String, Codable, CaseIterable, Sendable {
     case low, medium, high
+
+    var label: String {
+        switch self {
+        case .low:    "not sure yet"
+        case .medium: "fairly sure"
+        case .high:   "sure"
+        }
+    }
 }
 
+/// How much of a round goes to dishes the diner hasn't tried.
 @Generable
 enum ReconShare: String, Codable, CaseIterable, Sendable {
     case none, quarter, half, most
@@ -91,6 +109,15 @@ enum ReconShare: String, Codable, CaseIterable, Sendable {
         case .quarter: 0.25
         case .half:    0.5
         case .most:    0.75
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .none:    "only dishes you've tried"
+        case .quarter: "mostly tried, one new"
+        case .half:    "half new dishes"
+        case .most:    "mostly new dishes"
         }
     }
 }
@@ -104,6 +131,14 @@ enum Posture: String, Codable, CaseIterable, Sendable {
         case .conservative: 0.0
         case .balanced:     0.3
         case .aggressive:   0.7
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .conservative: "playing it safe"
+        case .balanced:     "balanced"
+        case .aggressive:   "taking a chance"
         }
     }
 }
@@ -128,24 +163,36 @@ enum ExclusionVerdict: String, Codable, Sendable {
 @Generable
 enum RoundMove: String, Codable, CaseIterable, Sendable {
     case exploit, pivot
+
+    var label: String {
+        switch self {
+        case .exploit: "stay with the guess"
+        case .pivot:   "change course"
+        }
+    }
 }
 
-/// Why the meal actually ended — a record, not advice.
-///
-/// Distinct from `StopReason`, which is the guard telling the diner they *should* stop.
-/// This is what happened. The capacity fit depends on the difference: a meal that ended
-/// on `fullness` is an observation of capacity, and every other ending is only a lower
-/// bound on it.
+/// Why the meal ended. Only a `fullness` ending measures capacity; the rest say
+/// "at least this much".
 @Generable
 enum MealEnding: String, Codable, CaseIterable, Sendable {
     case fullness, clock, closing, left, unknown
 
-    /// Only a `fullness` ending measures capacity. The rest say "at least this much".
+    static let offered: [MealEnding] = [.fullness, .clock, .closing, .left]
+
     var measuresCapacity: Bool { self == .fullness }
+
+    var label: String {
+        switch self {
+        case .fullness: "I'm full"
+        case .clock:    "Seating time ran out"
+        case .closing:  "The place is closing"
+        case .left:     "The group left"
+        case .unknown:  "Some other reason"
+        }
+    }
 }
 
-/// Five coarse states, spoken. `BUFFET.md` §6 — the output is a plate count, so
-/// precision past this is noise pretending to be signal.
 @Generable
 enum Fullness: String, Codable, CaseIterable, Sendable {
     case empty, light, comfortable, full, stuffed
@@ -176,8 +223,8 @@ struct FlavourProfile: Codable, Hashable, Sendable {
         let shared = Double(axes.intersection(other.axes).count)
         let total = Double(axes.union(other.axes).count)
         let axisPart = total > 0 ? shared / total : 0
-        let tempPart = temperatureHot == other.temperatureHot ? 0.2 : 0.0
-        return min(1.0, axisPart * 0.8 + tempPart)
+        let temperaturePart = temperatureHot == other.temperatureHot ? 0.2 : 0.0
+        return min(1.0, axisPart * 0.8 + temperaturePart)
     }
 
     static func prior(for category: MenuCategory) -> FlavourProfile {
@@ -194,24 +241,13 @@ struct FlavourProfile: Codable, Hashable, Sendable {
     }
 }
 
-/// Which capacity model the planner budgets against.
-///
-/// `TESTS.md` T64 decides this and it needs a real meal: if `predictedFullness` turns out
-/// not to track what the diner actually reports, a continuous `S_max` is too precise to
-/// knapsack against and the plan has to run on the five coarse states instead. T65 is the
-/// check that the fallback *runs*, which is why it exists before the decision is taken.
-enum CapacityScale: Sendable {
-    case continuous, ordinal
-}
-
 struct CapacityState: Sendable {
+    static let exhaustionThreshold = 0.12
+
     var maxSatiety: Double
     var spent: Double
-
-    /// The prior the within-meal correction is measured against. Equal to `maxSatiety`
-    /// until a fullness reading moves the estimate — testing the corrected figure against
-    /// the reading that produced it would be circular, and would make the capacity model
-    /// agree with itself by construction.
+    /// The prior before any fullness correction, so the capacity check tests the prior
+    /// and not the figure derived from the reading it is checking.
     var declaredMax: Double
 
     init(maxSatiety: Double, spent: Double, declaredMax: Double? = nil) {
@@ -222,12 +258,12 @@ struct CapacityState: Sendable {
 
     var remaining: Double { max(0, maxSatiety - spent) }
     var fractionRemaining: Double { maxSatiety > 0 ? remaining / maxSatiety : 0 }
-
-    var plateEstimate: Double { remaining / 3.0 }
-
-    /// Named so the stop screen can print it beside the reading. Showing both numbers
-    /// is what makes "computed, not chosen" checkable rather than claimed.
-    static let exhaustionThreshold = 0.12
-
+    var plateEstimate: Double { remaining / CapacityEngine.platesToSatiety }
     var isExhausted: Bool { fractionRemaining <= Self.exhaustionThreshold }
+
+    var platesLeftSentence: String {
+        plateEstimate < 0.75
+            ? "About half a plate left."
+            : "About \(plateEstimate.formatted(.number.precision(.fractionLength(1)))) plates left."
+    }
 }

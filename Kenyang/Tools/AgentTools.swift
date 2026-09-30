@@ -1,58 +1,39 @@
 import Foundation
 import FoundationModels
 
+/// What the tools read during one agent run, and which of them the AI called.
 actor ToolContext {
     static let shared = ToolContext()
 
-    private(set) var sightings: [DishSighting] = []
-    private(set) var events: [TasteEvent] = []
-    private(set) var capacity = CapacityState(maxSatiety: SessionDefaults.maxSatiety, spent: 0)
-    private(set) var minutesRemaining: Int?
-    private(set) var exclusions: [String] = []
-    private(set) var basisRecords: [BasisRecord] = []
-    private(set) var fullnessReadings: [FullnessReading] = []
-    private(set) var hypothesisCategory: MenuCategory = .unknown
+    private(set) var input = AgentInput.empty
     private(set) var invoked: Set<String> = []
-
-    func load(sightings: [DishSighting],
-              events: [TasteEvent],
-              capacity: CapacityState,
-              minutesRemaining: Int?,
-              exclusions: [String],
-              basisRecords: [BasisRecord],
-              fullnessReadings: [FullnessReading],
-              hypothesisCategory: MenuCategory) {
-        self.sightings = sightings
-        self.events = events
-        self.capacity = capacity
-        self.minutesRemaining = minutesRemaining
-        self.exclusions = exclusions
-        self.basisRecords = basisRecords
-        self.fullnessReadings = fullnessReadings
-        self.hypothesisCategory = hypothesisCategory
-    }
-
-    /// Lets the wait screen show a tool line the moment it returns rather than after
-    /// the whole stage finishes. Set by the view model for the duration of a round and
-    /// cleared afterwards, so nothing holds a reference to a screen that is gone.
     private var observer: (@Sendable (String, String) -> Void)?
 
+    var sightings: [DishSighting] { input.sightings }
+    var events: [TasteEvent] { input.events }
+    var capacity: CapacityState { input.capacity }
+    var minutesRemaining: Int? { input.minutesRemaining }
+    var exclusions: [String] { input.exclusions }
+    var basisRecords: [BasisRecord] { input.basisRecords }
+    var fullnessReadings: [FullnessReading] { input.fullnessReadings }
+    var calledTools: [String] { invoked.sorted() }
+
+    func load(_ input: AgentInput) {
+        self.input = input
+        invoked = []
+    }
+
+    /// Streams each result to the wait screen as it returns.
     func observe(_ observer: (@Sendable (String, String) -> Void)?) {
         self.observer = observer
     }
 
-    func resetInvocations() { invoked = [] }
-
     func note(_ name: String) { invoked.insert(name) }
 
-    /// Tools call this on the way out, so the result — including a refusal — is what
-    /// reaches the screen.
     func note(_ name: String, result: String) {
         invoked.insert(name)
         observer?(name, result)
     }
-
-    var invocationList: [String] { invoked.sorted() }
 }
 
 struct GetSpreadTool: Tool {
@@ -91,7 +72,7 @@ struct GetPosteriorTool: Tool {
         await ToolContext.shared.note(name)
         let events = await ToolContext.shared.events
         let p = ValueEngine.categoryPosterior(arguments.category, events: events)
-        guard StatisticalGuard.canClaim(p) else {
+        guard p.isTrustworthy else {
             await ToolContext.shared.note(name, result: "insufficient")
             return "\(arguments.category.rawValue): insufficient data (n=\(p.sampleCount))"
         }
@@ -140,12 +121,9 @@ struct CheckCapacityModelTool: Tool {
             await ToolContext.shared.note(name, result: "insufficient")
             return "checkCapacityModel = insufficient (no fullness reading this meal; the capacity estimate is unverified)"
         }
-        // The prior, not the corrected figure: `correctedMax` already moved the estimate
-        // toward this reading, so testing against it would report `consistent` whatever
-        // the diner said. One rule, shared with `CapacityEngine.verdict(for:)`.
         let predicted = CapacityEngine.predictedFullness(
             CapacityState(maxSatiety: capacity.declaredMax, spent: latest.cumulativeSatiety))
-        let verdict = CapacityEngine.verdict(maxSatiety: capacity.declaredMax, readings: readings)
+        let verdict = CapacityEngine.verdict(declaredMax: capacity.declaredMax, readings: readings)
         await ToolContext.shared.note(name, result: verdict.rawValue)
         return "checkCapacityModel = \(verdict.rawValue) (predicted fullness \(predicted)/5, diner reported \(latest.value)/5)"
     }
@@ -244,9 +222,4 @@ enum AgentToolbox {
             GetVisitHistoryTool()
         ]
     }
-
-    static let allNames = [
-        "getSpread", "getPosterior", "evaluateHypothesis", "checkCapacityModel",
-        "getRemainingCapacity", "getBasisCalibration", "getConstraints", "getVisitHistory"
-    ]
 }

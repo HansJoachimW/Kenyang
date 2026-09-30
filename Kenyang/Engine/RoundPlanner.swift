@@ -5,17 +5,16 @@ struct PlannedItem: Identifiable, Sendable {
     let dishName: String
     let category: MenuCategory
     let portion: PortionBucket
+    /// Never rated, so this round orders it once to learn from.
     let isRecon: Bool
-    /// For all of its orders.
-    let satietyCost: Double
-    /// One line naming the arithmetic that put this dish here. The model contributes the
-    /// claim and the objective; the ordering is beam search over that objective, and the
-    /// screen says which is which rather than letting the plan read as one voice.
+    /// Across all of its orders.
+    var satietyCost: Double
     var reason: String = ""
-    /// How many orders. An order-based buffet serves printed plates, not tastes, so an
-    /// untried dish is one order — enough to learn from — and only a dish the ratings
-    /// back can be ordered again.
     var quantity: Int = 1
+    /// The avoid list can't settle it yet; the round waits until the diner asks staff.
+    var needsCheck: Bool = false
+
+    var orderLabel: String { quantity > 1 ? "\(dishName) ×\(quantity)" : dishName }
 }
 
 struct RoundPlan: Sendable {
@@ -23,24 +22,12 @@ struct RoundPlan: Sendable {
     var rationale: String
     var reconShare: ReconShare
     var posture: Posture
-
-    /// Dishes whose ingredients the app could not determine. A binary validator fails
-    /// open and calls these *safe*; this one refuses to plan them — but refusing is
-    /// only half the job. Silently dropping them is what made a single exclusion empty
-    /// every plan with no explanation, so they leave the planner by name and the
-    /// surfaces above ask staff about them.
-    var deferToStaff: [String] = []
-
-    /// How many dishes the exclusion list ruled out outright. Counted, not named: the
-    /// list is an input and the app never explains why something is on it.
     var excludedCount: Int = 0
 
-    var totalSatietyCost: Double { items.reduce(0) { $0 + $1.satietyCost } }
-    var reconCount: Int { items.filter(\.isRecon).count }
     var isEmpty: Bool { items.isEmpty }
-
-    /// An empty plan the diner can act on, versus one that just says nothing.
-    var hasUnresolvedDishes: Bool { !deferToStaff.isEmpty }
+    var totalSatietyCost: Double { items.reduce(0) { $0 + $1.satietyCost } }
+    var dishesToAskAbout: [String] { items.filter(\.needsCheck).map(\.dishName) }
+    var needsAnswers: Bool { !dishesToAskAbout.isEmpty }
 }
 
 struct PlannerObjective: Sendable {
@@ -57,184 +44,145 @@ struct PlannerObjective: Sendable {
                                            rationale: "Balanced default")
 }
 
+/// Beam search over orders, under the objective the AI chose. A path may repeat a dish;
+/// the satiety discount prices each repeat below the one before.
 struct RoundPlanner {
     static let beamWidth = 24
-    static let maxItems = 4
+    static let maxDishes = 4
     static let maxOrders = 6
     static let maxOrdersPerDish = 3
+
+    let objective: PlannerObjective
+    let events: [TasteEvent]
+    let capacity: CapacityState
+    private let learnSet: Set<String>
 
     static func plan(objective: PlannerObjective,
                      candidates: [DishSighting],
                      events: [TasteEvent],
                      capacity: CapacityState,
-                     exclusions: [String],
-                     scale: CapacityScale = .continuous) -> RoundPlan {
+                     exclusions: [String]) -> RoundPlan {
+        RoundPlanner(objective: objective, events: events, capacity: capacity)
+            .plan(candidates: candidates, exclusions: exclusions)
+    }
 
-        let partition = ExclusionValidator.partition(candidates, exclusions: exclusions)
-        let allowed = partition.safe
-        let deferToStaff = partition.unknown.map(\.name).sorted()
+    private init(objective: PlannerObjective, events: [TasteEvent], capacity: CapacityState) {
+        self.objective = objective
+        self.events = events
+        self.capacity = capacity
+        self.learnSet = Set(objective.learnAbout.map { $0.lowercased() })
+    }
 
-        func empty() -> RoundPlan {
-            RoundPlan(items: [], rationale: objective.rationale,
-                      reconShare: objective.reconShare, posture: objective.posture,
-                      deferToStaff: deferToStaff, excludedCount: partition.excluded.count)
+    private func plan(candidates: [DishSighting], exclusions: [String]) -> RoundPlan {
+        let verdicts = ExclusionValidator.partition(candidates, exclusions: exclusions)
+        let allowed = verdicts.safe + verdicts.unknown
+        let unchecked = Set(verdicts.unknown.map(\.name))
+        let budget = min(capacity.remaining, CapacityEngine.platesToSatiety * 1.2)
+
+        var plan = RoundPlan(items: [],
+                             rationale: objective.rationale,
+                             reconShare: objective.reconShare,
+                             posture: objective.posture,
+                             excludedCount: verdicts.excluded.count)
+        guard !allowed.isEmpty, budget > 0.2 else { return plan }
+
+        let best = bestPath(from: allowed, budget: budget)
+        let dishes = best.reduce(into: [DishSighting]()) { distinct, sighting in
+            if !distinct.contains(where: { $0.name == sighting.name }) { distinct.append(sighting) }
         }
-
-        guard !allowed.isEmpty else { return empty() }
-
-        // Under `.ordinal` the round is budgeted from the five coarse states instead of a
-        // continuous `S_max` — the fallback T64 may force, kept runnable by T65.
-        let available = scale == .ordinal ? CapacityEngine.ordinalRemaining(capacity)
-                                          : capacity.remaining
-        let budget = min(available, CapacityEngine.platesToSatiety * 1.2)
-        guard budget > 0.2 else { return empty() }
-
-        let learnSet = Set(objective.learnAbout.map { $0.lowercased() })
-
-        // Reconnaissance is a property of the dish, not of its position in the list.
-        // A dish nobody has rated cannot be exploited — there is nothing to exploit —
-        // and a dish the agent asked to learn about is recon by definition. Recon is one
-        // order; only an exploit dish may be ordered again.
-        func isRecon(_ sighting: DishSighting) -> Bool {
-            if learnSet.contains(sighting.name.lowercased()) { return true }
-            return ValueEngine.posterior(dishName: sighting.name,
-                                         category: sighting.category,
-                                         events: events).sampleCount == 0
-        }
-
-        func orderLimit(_ sighting: DishSighting) -> Int {
-            isRecon(sighting) ? 1 : maxOrdersPerDish
-        }
-
-        // One order is one printed plate, and the search prices exactly what it serves.
-        func cost(_ sighting: DishSighting) -> Double {
-            ValueEngine.satietyCost(for: sighting, portion: .normal)
-        }
-
-        func score(_ sighting: DishSighting, alreadyChosen: [DishSighting]) -> Double {
-            let posterior = ValueEngine.posterior(dishName: sighting.name,
-                                                  category: sighting.category,
-                                                  events: events)
-            var value = SatietyDiscount.discountedValue(for: sighting, events: events)
-
-            let simulated = events + alreadyChosen.map {
-                TasteEvent(dishName: $0.name, category: $0.category,
-                           rating: .fine, portion: .normal, roundIndex: 0)
-            }
-            value *= SatietyDiscount.discount(for: sighting, history: simulated)
-
-            let recon = objective.reconShare.fraction
-
-            value += posterior.uncertainty * recon * 0.8
-
-            let categoriesChosen = Set(alreadyChosen.map(\.category))
-            let coverage = categoriesChosen.contains(sighting.category) ? -1.0 : 1.0
-            value += coverage * recon * 0.9
-
-            value += (1 - recon) * posterior.mean * 0.7
-
-            if learnSet.contains(sighting.name.lowercased()) { value += 0.5 * (0.4 + recon) }
-            if let avoid = objective.avoidProfile, sighting.flavour.axes.contains(avoid) {
-                value -= 0.6
-            }
-            value += posterior.uncertainty * objective.posture.uncertaintyWeight * 0.4
-            if sighting.isTerminal && capacity.fractionRemaining > 0.35 {
-                value -= 0.7
-            }
-            if sighting.queueMinutes > 0 {
-                value -= Double(sighting.queueMinutes) / 60.0
-            }
-            return value
-        }
-
-        var beam: [[DishSighting]] = [[]]
-
-        // A path is a list of orders, so a dish may appear more than once. The satiety
-        // discount in `score` sees the repeats as history, which is what prices a second
-        // plate of the same thing below the first.
-        for _ in 0..<maxOrders {
-            var expanded: [(path: [DishSighting], score: Double)] = []
-            for path in beam {
-                let used = path.reduce(0.0) { $0 + cost($1) }
-                let dishes = Set(path.map(\.name))
-                for candidate in allowed {
-                    let orders = path.filter { $0.name == candidate.name }.count
-                    guard orders < orderLimit(candidate),
-                          orders > 0 || dishes.count < maxItems,
-                          used + cost(candidate) <= budget else { continue }
-                    let next = path + [candidate]
-                    let total = next.enumerated().reduce(0.0) { acc, pair in
-                        acc + score(pair.element, alreadyChosen: Array(next.prefix(pair.offset)))
-                    }
-                    expanded.append((next, total))
-                }
-            }
-            guard !expanded.isEmpty else { break }
-            beam = expanded.sorted { $0.score > $1.score }.prefix(beamWidth).map(\.path)
-        }
-
-        guard let best = beam.max(by: { lhs, rhs in
-            let l = lhs.enumerated().reduce(0.0) { acc, pair in
-                acc + score(pair.element, alreadyChosen: Array(lhs.prefix(pair.offset)))
-            }
-            let r = rhs.enumerated().reduce(0.0) { acc, pair in
-                acc + score(pair.element, alreadyChosen: Array(rhs.prefix(pair.offset)))
-            }
-            return l < r
-        }), !best.isEmpty else {
-            return empty()
-        }
-
-        var distinct: [DishSighting] = []
-        for sighting in best where !distinct.contains(where: { $0.name == sighting.name }) {
-            distinct.append(sighting)
-        }
-        let items = orderForSatiety(distinct).map { sighting -> PlannedItem in
+        plan.items = Self.orderedByContrast(dishes).map { sighting in
             let quantity = best.filter { $0.name == sighting.name }.count
             return PlannedItem(dishName: sighting.name,
                                category: sighting.category,
                                portion: .normal,
                                isRecon: isRecon(sighting),
-                               satietyCost: cost(sighting) * Double(quantity),
-                               reason: reason(for: sighting, events: events),
-                               quantity: quantity)
+                               satietyCost: cost(of: sighting) * Double(quantity),
+                               reason: reason(for: sighting),
+                               quantity: quantity,
+                               needsCheck: unchecked.contains(sighting.name))
         }
-
-        return RoundPlan(items: items,
-                         rationale: objective.rationale,
-                         reconShare: objective.reconShare,
-                         posture: objective.posture,
-                         deferToStaff: deferToStaff,
-                         excludedCount: partition.excluded.count)
+        return plan
     }
 
-    /// Deterministic, and phrased as arithmetic rather than opinion — an EXPLOIT row
-    /// that cannot say why it was chosen is indistinguishable from a suggestion.
-    private static func reason(for sighting: DishSighting, events: [TasteEvent]) -> String {
-        let rated = events.filter {
+    private func bestPath(from allowed: [DishSighting], budget: Double) -> [DishSighting] {
+        var beam: [(path: [DishSighting], score: Double)] = [([], 0)]
+        for _ in 0..<Self.maxOrders {
+            let expanded = beam.flatMap { entry in
+                allowed.filter { canAdd($0, to: entry.path, budget: budget) }.map { entry.path + [$0] }
+            }
+            guard !expanded.isEmpty else { break }
+            let scored = expanded.map { (path: $0, score: score($0)) }
+            beam = Array(scored.sorted { $0.score > $1.score }.prefix(Self.beamWidth))
+        }
+        return beam.max { $0.score < $1.score }?.path ?? []
+    }
+
+    private func canAdd(_ sighting: DishSighting, to path: [DishSighting], budget: Double) -> Bool {
+        let orders = path.filter { $0.name == sighting.name }.count
+        let dishCount = Set(path.map(\.name)).count
+        let used = path.reduce(0) { $0 + cost(of: $1) }
+        return orders < orderLimit(for: sighting)
+            && (orders > 0 || dishCount < Self.maxDishes)
+            && used + cost(of: sighting) <= budget
+    }
+
+    private func score(_ path: [DishSighting]) -> Double {
+        path.indices.reduce(0) { total, index in
+            total + score(path[index], after: Array(path[..<index]))
+        }
+    }
+
+    private func score(_ sighting: DishSighting, after chosen: [DishSighting]) -> Double {
+        let posterior = ValueEngine.posterior(dishName: sighting.name, category: sighting.category, events: events)
+        let recon = objective.reconShare.fraction
+        let simulated = events + chosen.map {
+            TasteEvent(dishName: $0.name, category: $0.category, rating: .fine, portion: .normal, roundIndex: 0)
+        }
+
+        var value = SatietyDiscount.discountedValue(for: sighting, events: events)
+        value *= SatietyDiscount.discount(for: sighting, history: simulated)
+        value += posterior.uncertainty * recon * 0.8
+        value += (chosen.contains { $0.category == sighting.category } ? -1 : 1) * recon * 0.9
+        value += (1 - recon) * posterior.mean * 0.7
+        value += posterior.uncertainty * objective.posture.uncertaintyWeight * 0.4
+        if learnSet.contains(sighting.name.lowercased()) { value += 0.5 * (0.4 + recon) }
+        if let avoid = objective.avoidProfile, sighting.flavour.axes.contains(avoid) { value -= 0.6 }
+        if sighting.isTerminal && capacity.fractionRemaining > 0.35 { value -= 0.7 }
+        if sighting.queueMinutes > 0 { value -= Double(sighting.queueMinutes) / 60 }
+        return value
+    }
+
+    private func isRecon(_ sighting: DishSighting) -> Bool {
+        learnSet.contains(sighting.name.lowercased())
+            || ValueEngine.posterior(dishName: sighting.name, category: sighting.category, events: events).sampleCount == 0
+    }
+
+    private func orderLimit(for sighting: DishSighting) -> Int {
+        isRecon(sighting) ? 1 : Self.maxOrdersPerDish
+    }
+
+    private func cost(of sighting: DishSighting) -> Double {
+        ValueEngine.satietyCost(for: sighting)
+    }
+
+    private func reason(for sighting: DishSighting) -> String {
+        let ratings = events.filter {
             $0.isRated && $0.dishName.caseInsensitiveCompare(sighting.name) == .orderedSame
         }
-        let good = rated.filter { $0.rating == .good }.count
-
-        if rated.isEmpty {
-            return "Never rated here. One order to learn from."
-        }
-        if good > 0 {
-            return "Rated good \(good) of \(rated.count) time\(rated.count == 1 ? "" : "s")."
-        }
-        return "Rated \(rated.count) time\(rated.count == 1 ? "" : "s"), never good."
+        let good = ratings.filter { $0.rating == .good }.count
+        let times = ratings.count == 1 ? "time" : "times"
+        if ratings.isEmpty { return "Never rated here. One order to learn from." }
+        if good > 0 { return "Rated good \(good) of \(ratings.count) \(times)." }
+        return "Rated \(ratings.count) \(times), never good."
     }
 
-    private static func orderForSatiety(_ sightings: [DishSighting]) -> [DishSighting] {
-        var remaining = sightings
+    /// Dessert last, and each dish unlike the one before it.
+    private static func orderedByContrast(_ dishes: [DishSighting]) -> [DishSighting] {
+        var remaining = dishes.sorted { !$0.isTerminal && $1.isTerminal }
         var ordered: [DishSighting] = []
         while !remaining.isEmpty {
             if let last = ordered.last {
-                remaining.sort { lhs, rhs in
-                    lhs.flavour.similarity(to: last.flavour) < rhs.flavour.similarity(to: last.flavour)
-                }
-            } else {
-                remaining.sort { !$0.isTerminal && $1.isTerminal }
+                remaining.sort { $0.flavour.similarity(to: last.flavour) < $1.flavour.similarity(to: last.flavour) }
             }
             ordered.append(remaining.removeFirst())
         }

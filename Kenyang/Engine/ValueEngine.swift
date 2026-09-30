@@ -10,83 +10,56 @@ struct DishPosterior: Sendable {
     var isTrustworthy: Bool { sampleCount >= ValueEngine.minimumSamples }
 }
 
-struct ValueEngine {
+enum ValueEngine {
     static let minimumSamples = 2
-
-    static func posterior(dishName: String,
-                          category: MenuCategory,
-                          events: [TasteEvent]) -> DishPosterior {
-        // Only rated events carry value. An unrated log is a capacity observation and
-        // nothing more — counting it would invent a rating the diner never gave.
-        let matching = events.filter {
-            $0.isRated && $0.dishName.caseInsensitiveCompare(dishName) == .orderedSame
-        }
-        let n = matching.count
-        guard n > 0 else {
-            return DishPosterior(dishName: dishName,
-                                 category: category,
-                                 mean: category.priorValue,
-                                 sampleCount: 0,
-                                 uncertainty: 1.0)
-        }
-        let mean = matching.reduce(0.0) { $0 + $1.rating.score } / Double(n)
-        let prior = category.priorValue
-        let weight = Double(n) / Double(n + 1)
-        let blended = weight * mean + (1 - weight) * prior
-        return DishPosterior(dishName: dishName,
-                             category: category,
-                             mean: blended,
-                             sampleCount: n,
-                             uncertainty: 1.0 / Double(n + 1))
-    }
-
-    static func categoryPosterior(_ category: MenuCategory,
-                                 events: [TasteEvent]) -> DishPosterior {
-        let matching = events.filter { $0.isRated && $0.category == category }
-        let n = matching.count
-        guard n > 0 else {
-            return DishPosterior(dishName: category.label,
-                                 category: category,
-                                 mean: category.priorValue,
-                                 sampleCount: 0,
-                                 uncertainty: 1.0)
-        }
-        let mean = matching.reduce(0.0) { $0 + $1.rating.score } / Double(n)
-        return DishPosterior(dishName: category.label,
-                             category: category,
-                             mean: mean,
-                             sampleCount: n,
-                             uncertainty: 1.0 / Double(n + 1))
-    }
-
-    /// The guard band around the expectation, in rating-score units.
     static let verdictBand = 0.25
 
-    /// Whether the ratings so far bear the hypothesis out. **One rule, four call sites** —
-    /// `evaluateHypothesis` answers the model with it, `RoundAgent` checks the model's
-    /// move against it, and both batteries score against it. They have to agree: a
-    /// verdict guard firing on a disagreement it invented would read as the model
-    /// contradicting the tools.
-    ///
-    /// The test is one-sided and **which side depends on the claim**. *Expect good here*
-    /// is falsified by the category rating worse. *Expect skip here* is the opposite
-    /// claim — that the category is not worth the capacity — and it is falsified by the
-    /// category rating **better**. Testing both the same way put the `skip` threshold at
-    /// −0.25, below every rating on a 0…1 scale, so the one hypothesis shape that is pure
-    /// falsification came back `supported` whatever the diner said.
+    static func posterior(dishName: String, category: MenuCategory, events: [TasteEvent]) -> DishPosterior {
+        let ratings = events
+            .filter { $0.isRated && $0.dishName.caseInsensitiveCompare(dishName) == .orderedSame }
+            .map(\.rating.score)
+        guard !ratings.isEmpty else {
+            return DishPosterior(dishName: dishName, category: category,
+                                 mean: category.priorValue, sampleCount: 0, uncertainty: 1)
+        }
+        let n = Double(ratings.count)
+        let observed = ratings.reduce(0, +) / n
+        let weight = n / (n + 1)
+        return DishPosterior(dishName: dishName,
+                             category: category,
+                             mean: weight * observed + (1 - weight) * category.priorValue,
+                             sampleCount: ratings.count,
+                             uncertainty: 1 / (n + 1))
+    }
+
+    static func categoryPosterior(_ category: MenuCategory, events: [TasteEvent]) -> DishPosterior {
+        let ratings = events.filter { $0.isRated && $0.category == category }.map(\.rating.score)
+        guard !ratings.isEmpty else {
+            return DishPosterior(dishName: category.label, category: category,
+                                 mean: category.priorValue, sampleCount: 0, uncertainty: 1)
+        }
+        let n = Double(ratings.count)
+        return DishPosterior(dishName: category.label,
+                             category: category,
+                             mean: ratings.reduce(0, +) / n,
+                             sampleCount: ratings.count,
+                             uncertainty: 1 / (n + 1))
+    }
+
+    /// One-sided in the direction the guess points: expecting *good* is disproved by
+    /// worse ratings, expecting *skip* by better ones.
     static func verdict(_ posterior: DishPosterior, expecting expected: Rating) -> HypothesisVerdict {
         guard posterior.isTrustworthy else { return .insufficient }
-        if expected == .skip {
-            return posterior.mean <= expected.score + verdictBand ? .supported : .contradicted
-        }
-        return posterior.mean >= expected.score - verdictBand ? .supported : .contradicted
+        let holds = expected == .skip
+            ? posterior.mean <= expected.score + verdictBand
+            : posterior.mean >= expected.score - verdictBand
+        return holds ? .supported : .contradicted
     }
 
     static func estimatedValue(for sighting: DishSighting, events: [TasteEvent]) -> Double {
-        let post = posterior(dishName: sighting.name, category: sighting.category, events: events)
-        var value = post.mean
-        if sighting.tierRank > 0 { value += 0.25 * min(1.0, Double(sighting.tierRank) / 2.0) }
-        return min(1.5, value)
+        let mean = posterior(dishName: sighting.name, category: sighting.category, events: events).mean
+        let tierBonus = sighting.tierRank > 0 ? 0.25 * min(1, Double(sighting.tierRank) / 2) : 0
+        return min(1.5, mean + tierBonus)
     }
 
     static func satietyCost(for sighting: DishSighting, portion: PortionBucket = .normal) -> Double {
@@ -95,65 +68,39 @@ struct ValueEngine {
 
     static func valueDensity(for sighting: DishSighting, events: [TasteEvent]) -> Double {
         let cost = satietyCost(for: sighting)
-        guard cost > 0 else { return 0 }
-        return estimatedValue(for: sighting, events: events) / cost
+        return cost > 0 ? estimatedValue(for: sighting, events: events) / cost : 0
     }
 }
 
-struct SatietyDiscount {
-    static let lambda: Double = 0.55
+/// The same flavour again tastes less good: recent similar plates lower a dish's value.
+enum SatietyDiscount {
+    static let lambda = 0.55
 
     static func discount(for sighting: DishSighting, history: [TasteEvent]) -> Double {
-        guard !history.isEmpty else { return 1.0 }
-        let recent = history.suffix(6).reversed()
-        var penalty = 0.0
-        for (index, event) in recent.enumerated() {
-            let decay = 1.0 / Double(index + 1)
-            let similarity = sighting.flavour.similarity(to: FlavourProfile.prior(for: event.category))
-            penalty += decay * similarity
+        guard !history.isEmpty else { return 1 }
+        let recent = Array(history.suffix(6).reversed())
+        let penalty = recent.enumerated().reduce(0.0) { total, pair in
+            let similarity = sighting.flavour.similarity(to: .prior(for: pair.element.category))
+            return total + similarity / Double(pair.offset + 1)
         }
-        let normalised = penalty / Double(max(1, recent.count))
-        return max(0.15, 1.0 - lambda * normalised)
+        return max(0.15, 1 - lambda * penalty / Double(recent.count))
     }
 
-    static func discountedValue(for sighting: DishSighting,
-                                events: [TasteEvent]) -> Double {
-        ValueEngine.valueDensity(for: sighting, events: events)
-            * discount(for: sighting, history: events)
+    static func discountedValue(for sighting: DishSighting, events: [TasteEvent]) -> Double {
+        ValueEngine.valueDensity(for: sighting, events: events) * discount(for: sighting, history: events)
     }
 }
 
-struct BreakEven {
-    /// Rupiah a single normal portion is worth at the bottom of the value scale, before
-    /// the category prior lifts it. A coarse à-la-carte anchor, not a measured price —
-    /// it only has to rank dishes consistently, and it cancels out of any comparison
-    /// between two of them.
+/// A rough rupiah value of what was eaten, stated once at the stop and never during a meal.
+enum BreakEven {
     static let baseRupiahPerPortion = 18_000.0
-
-    /// Floor under `priorValue` so a category the model rates at zero is still worth
-    /// something rather than free.
     static let priorFloor = 0.2
 
     static func rupiah(for category: MenuCategory) -> Double {
         baseRupiahPerPortion * (category.priorValue + priorFloor)
     }
 
-    static func recovered(events: [TasteEvent], sightings: [DishSighting]) -> Double {
-        events.reduce(0.0) { total, event in
-            total + rupiah(for: event.category) * event.portion.multiplier
-        }
-    }
-
-    static func projection(pricePerHead: Double,
-                           sightings: [DishSighting],
-                           expectedSatiety: Double) -> Double {
-        guard !sightings.isEmpty else { return 0 }
-        let bestDensity = sightings
-            .map { rupiah(for: $0.category) / ValueEngine.satietyCost(for: $0) }
-            .sorted(by: >)
-            .prefix(6)
-        guard !bestDensity.isEmpty else { return 0 }
-        let average = bestDensity.reduce(0, +) / Double(bestDensity.count)
-        return average * expectedSatiety
+    static func recovered(events: [TasteEvent]) -> Double {
+        events.reduce(0) { $0 + rupiah(for: $1.category) * $1.portion.multiplier }
     }
 }

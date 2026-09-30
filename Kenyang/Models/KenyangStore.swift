@@ -1,7 +1,11 @@
 import Foundation
+import Observation
 import SwiftData
 
+/// Reads and writes the SwiftData store. Everything about the meal in progress lives in
+/// `MealSession`.
 @MainActor
+@Observable
 final class KenyangStore {
     let container: ModelContainer
     var context: ModelContext { container.mainContext }
@@ -20,25 +24,73 @@ final class KenyangStore {
         }
     }
 
+    // MARK: - Visits
+
     func activeVisit() -> Visit? {
-        let descriptor = FetchDescriptor<Visit>(
-            predicate: #Predicate { $0.endedAt == nil },
-            sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
-        )
-        return try? context.fetch(descriptor).first
+        fetch(FetchDescriptor<Visit>(predicate: #Predicate { $0.endedAt == nil },
+                                     sortBy: [SortDescriptor(\.startedAt, order: .reverse)])).first
     }
 
     func allVisits() -> [Visit] {
-        let descriptor = FetchDescriptor<Visit>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
-        return (try? context.fetch(descriptor)) ?? []
+        fetch(FetchDescriptor<Visit>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)]))
     }
+
+    func pastVisits() -> [Visit] {
+        allVisits().filter { !$0.isActive }
+    }
+
+    func startVisit(at venueName: String,
+                    pricePerHead: Double,
+                    seatingMinutes: Int?,
+                    maxSatiety: Double,
+                    dishes: [BuffetMenu.Dish]) -> Visit {
+        let visit = Visit(restaurant: restaurant(named: venueName, pricePerHead: pricePerHead),
+                          pricePerHead: pricePerHead,
+                          seatingLimitMinutes: seatingMinutes,
+                          declaredMaxSatiety: maxSatiety)
+        context.insert(visit)
+        for dish in dishes {
+            let sighting = DishSighting(name: dish.name, category: dish.category,
+                                        printedCategory: dish.section, tierRank: dish.tier)
+            sighting.visit = visit
+            context.insert(sighting)
+        }
+        save()
+        return visit
+    }
+
+    func endVisit(_ visit: Visit, because ending: MealEnding) {
+        visit.endedAt = .now
+        visit.outcome = .stopped
+        visit.endedBecause = ending
+        save()
+    }
+
+    // MARK: - Restaurants and dishes
 
     func restaurant(named name: String) -> Restaurant? {
-        let descriptor = FetchDescriptor<Restaurant>(predicate: #Predicate { $0.name == name })
-        return try? context.fetch(descriptor).first
+        fetch(FetchDescriptor<Restaurant>(predicate: #Predicate { $0.name == name })).first
     }
 
-    func findOrCreate(named name: String, pricePerHead: Double) -> Restaurant {
+    func allRestaurants() -> [Restaurant] {
+        fetch(FetchDescriptor<Restaurant>(sortBy: [SortDescriptor(\.name)]))
+    }
+
+    func allSightings() -> [DishSighting] {
+        fetch(FetchDescriptor<DishSighting>())
+    }
+
+    func sightings(named name: String) -> [DishSighting] {
+        fetch(FetchDescriptor<DishSighting>(predicate: #Predicate { $0.name == name }))
+    }
+
+    func latestRatingByDish() -> [String: Rating] {
+        fetch(FetchDescriptor<TasteEvent>(sortBy: [SortDescriptor(\.at)]))
+            .filter(\.isRated)
+            .reduce(into: [:]) { latest, event in latest[event.dishName] = event.rating }
+    }
+
+    private func restaurant(named name: String, pricePerHead: Double) -> Restaurant {
         if let existing = restaurant(named: name) {
             existing.pricePerHead = pricePerHead
             return existing
@@ -48,28 +100,41 @@ final class KenyangStore {
         return created
     }
 
-    /// Records a menu tier against a venue and returns its rank in that venue's ladder.
-    /// Which menu you import *is* the tier, so rank is a venue-level fact rather than
-    /// something extracted per item. New tiers append, so import the base menu first.
-    func tierRank(of tierName: String, venue name: String, pricePerHead: Double) -> Int {
-        let restaurant = findOrCreate(named: name, pricePerHead: pricePerHead)
-        if let existing = restaurant.tierNames.firstIndex(of: tierName) {
-            // A re-import is the newer price; the ladder is what it costs today.
-            if restaurant.tierPrices.indices.contains(existing) {
-                restaurant.tierPrices[existing] = pricePerHead
-                save()
-            }
-            return existing
-        }
-        restaurant.tierNames.append(tierName)
-        restaurant.tierPrices.append(pricePerHead)
+    // MARK: - Plates
+
+    @discardableResult
+    func addPlate(of dishName: String, category: MenuCategory, rating: Rating?,
+                  portion: PortionBucket = .normal, round: Int, in visit: Visit) -> TasteEvent {
+        let plate = TasteEvent(dishName: dishName, category: category, rating: rating,
+                               portion: portion, roundIndex: round)
+        plate.visit = visit
+        context.insert(plate)
         save()
-        return restaurant.tierNames.count - 1
+        return plate
     }
 
+    func plates(of dishName: String, round: Int, in visit: Visit) -> [TasteEvent] {
+        visit.tasteEvents.filter {
+            $0.roundIndex == round && $0.dishName.caseInsensitiveCompare(dishName) == .orderedSame
+        }
+    }
+
+    func delete(_ plate: TasteEvent) {
+        context.delete(plate)
+        save()
+    }
+
+    func recordFullness(_ level: Int, in visit: Visit) {
+        let reading = FullnessReading(value: level, cumulativeSatiety: CapacityEngine.totalSatiety(of: visit))
+        reading.visit = visit
+        context.insert(reading)
+        save()
+    }
+
+    // MARK: - Avoid list
+
     func exclusions() -> [String] {
-        let descriptor = FetchDescriptor<DietaryExclusion>()
-        return ((try? context.fetch(descriptor)) ?? []).map(\.term)
+        fetch(FetchDescriptor<DietaryExclusion>(sortBy: [SortDescriptor(\.createdAt)])).map(\.term)
     }
 
     func addExclusion(_ term: String) {
@@ -80,317 +145,40 @@ final class KenyangStore {
     }
 
     func removeExclusion(_ term: String) {
-        let descriptor = FetchDescriptor<DietaryExclusion>(predicate: #Predicate { $0.term == term })
-        guard let match = try? context.fetch(descriptor).first else { return }
+        guard let match = fetch(FetchDescriptor<DietaryExclusion>(predicate: #Predicate { $0.term == term })).first else { return }
         context.delete(match)
         save()
     }
 
-    /// The diner asked staff and the answer was no. Recorded against the term, not as a
-    /// blanket "safe", so adding an exclusion later re-opens the question.
-    ///
-    /// This is the only path that resolves an `unknown` dish. The alternative — asking
-    /// the model whether *Nasi Goreng* contains peanuts — is the confident-and-wrong
-    /// failure the scope narrowing on 2026-09-04 exists to avoid, and it would be
-    /// wrong in the one direction that puts someone in hospital.
-    func clearExclusion(_ term: String, for sighting: DishSighting) {
-        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !trimmed.isEmpty, !sighting.clearedTerms.contains(trimmed) else { return }
-        sighting.clearedTerms.append(trimmed)
+    /// The diner asked staff about one ingredient in one dish.
+    func recordAnswer(_ term: String, contains: Bool, for sighting: DishSighting) {
+        let term = term.lowercased()
+        if contains {
+            if !sighting.ingredients.contains(term) { sighting.ingredients.append(term) }
+        } else if !sighting.clearedTerms.contains(term) {
+            sighting.clearedTerms.append(term)
+        }
         save()
     }
 
-    /// The answer was yes. The term joins the ingredient list, which makes the dish
-    /// `excluded` for good.
-    func flagExclusion(_ term: String, for sighting: DishSighting) {
-        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !trimmed.isEmpty, !sighting.ingredients.contains(trimmed) else { return }
-        sighting.ingredients.append(trimmed)
-        save()
-    }
+    // MARK: - How the AI's guesses turn out
 
     func basisRecords() -> [BasisRecord] {
-        let descriptor = FetchDescriptor<BasisRecord>(sortBy: [SortDescriptor(\.at, order: .reverse)])
-        return (try? context.fetch(descriptor)) ?? []
+        fetch(FetchDescriptor<BasisRecord>(sortBy: [SortDescriptor(\.at, order: .reverse)]))
     }
 
-    func historicalEvents(for restaurant: Restaurant?) -> [TasteEvent] {
-        guard let restaurant else { return [] }
-        return restaurant.visits.flatMap(\.tasteEvents)
-    }
-
-    struct VocabularyAudit: Sendable {
-        var sightings = 0
-        var events = 0
-        var undecodable = 0
-        var unknown = 0
-
-        var total: Int { sightings + events }
-        var damaged: Int { undecodable + unknown }
-        var isClean: Bool { damaged == 0 }
-        var unknownFraction: Double { total > 0 ? Double(unknown) / Double(total) : 0 }
-    }
-
-    func auditPersistedCategories() -> VocabularyAudit {
-        var audit = VocabularyAudit()
-        let sightings = (try? context.fetch(FetchDescriptor<DishSighting>())) ?? []
-        let events = (try? context.fetch(FetchDescriptor<TasteEvent>())) ?? []
-        audit.sightings = sightings.count
-        audit.events = events.count
-
-        let raws = sightings.map(\.categoryRaw) + events.map(\.categoryRaw)
-        audit.undecodable = raws.filter { MenuCategory(rawValue: $0) == nil }.count
-        audit.unknown = raws.filter { MenuCategory(rawValue: $0) == .unknown }.count
-        return audit
-    }
-
-    func allDishNames() -> [String] {
-        let descriptor = FetchDescriptor<DishSighting>()
-        let sightings = (try? context.fetch(descriptor)) ?? []
-        return Array(Set(sightings.map(\.name))).sorted()
-    }
-
-    func sightings(named name: String) -> [DishSighting] {
-        let descriptor = FetchDescriptor<DishSighting>(predicate: #Predicate { $0.name == name })
-        return (try? context.fetch(descriptor)) ?? []
-    }
-
-    func allSightings() -> [DishSighting] {
-        (try? context.fetch(FetchDescriptor<DishSighting>())) ?? []
-    }
-
-    func allRestaurants() -> [Restaurant] {
-        let descriptor = FetchDescriptor<Restaurant>(sortBy: [SortDescriptor(\.name)])
-        return (try? context.fetch(descriptor)) ?? []
-    }
-
-    /// The most recent rating per dish, for entities that carry it into Spotlight
-    /// and for `EntityPropertyQuery` filters like *dishes I rated good at Gyu-Kaku*.
-    func ratingsByDish() -> [String: Rating] {
-        let descriptor = FetchDescriptor<TasteEvent>(sortBy: [SortDescriptor(\.at, order: .forward)])
-        let events = (try? context.fetch(descriptor)) ?? []
-        return events.reduce(into: [:]) { latest, event in
-            latest[event.dishName] = event.rating
-        }
-    }
-
-    @discardableResult
-    func startVisit(restaurantName: String,
-                    pricePerHead: Double,
-                    seatingLimitMinutes: Int?,
-                    maxSatiety: Double) -> Visit {
-        let restaurant = findOrCreate(named: restaurantName, pricePerHead: pricePerHead)
-        // Where the venue is, so the arrival trigger can recognise it next time. Silent
-        // and best-effort: it writes nothing unless location was already granted, and it
-        // never prompts in the middle of sitting down (§10b).
-        ProactiveTrigger.shared.noteLocation(of: restaurant)
-        let visit = Visit(restaurant: restaurant,
-                          pricePerHead: pricePerHead,
-                          seatingLimitMinutes: seatingLimitMinutes,
-                          declaredMaxSatiety: maxSatiety)
-        context.insert(visit)
-        save()
-        passedOrders = []
-        return visit
-    }
-
-    func addSightings(_ specs: [(name: String, category: MenuCategory, printed: String, tier: Int)],
-                      to visit: Visit) {
-        for spec in specs {
-            let sighting = DishSighting(name: spec.name,
-                                        category: spec.category,
-                                        printedCategory: spec.printed,
-                                        tierRank: spec.tier)
-            sighting.visit = visit
-            context.insert(sighting)
-        }
+    func recordGuessOutcome(basis: ValueBasis, expected: Rating, actual: Rating) {
+        context.insert(BasisRecord(basis: basis, expectedScore: expected.score, actualScore: actual.score))
         save()
     }
 
-    /// Record that a dish was eaten. `rating` is optional on purpose: logging *that*
-    /// you ate is a capacity observation and logging *how good it was* is a value
-    /// observation. They are separate loops and neither may gate the other (§3e).
-    @discardableResult
-    func rate(dishName: String,
-              category: MenuCategory,
-              rating: Rating?,
-              portion: PortionBucket,
-              in visit: Visit,
-              roundIndex: Int) -> TasteEvent {
-        let event = TasteEvent(dishName: dishName,
-                               category: category,
-                               rating: rating,
-                               portion: portion,
-                               roundIndex: roundIndex)
-        event.visit = visit
-        context.insert(event)
-        save()
-        return event
-    }
-
-    /// The plan the agent last produced, so a snippet can re-render itself without
-    /// paying for another round of model calls. In memory only — if the process was
-    /// relaunched between taps the snippet says so rather than inventing a plan.
-    var lastPlan: RoundPlan?
-
-    /// Accepting a round is the diner agreeing to eat it. `running` was already in
-    /// `SessionOutcome` and unused, so this needs no schema change — and a schema
-    /// change on submission day is not a risk worth taking.
-    func acceptRound(_ visit: Visit) {
-        visit.outcome = .running
-        save()
-    }
-
-    /// The last Action Button press, held open for its reassign window.
-    ///
-    /// In memory, like `lastPlan`. If the process died between the two presses the
-    /// window is simply gone and the second press logs a new item rather than
-    /// correcting the first — which is the safe direction: a lost correction leaves an
-    /// honest log, a resurrected one would delete an event the diner never revisited.
-    struct PendingLog {
-        var event: TasteEvent
-        var itemIndex: Int
-        var at: Date
-    }
-
-    var pendingLog: PendingLog?
-
-    /// The next order in the round the diner has not logged yet, in **plan order**.
-    /// Beam search already ranked the round, so plan order is the disambiguator — that
-    /// is what lets one press resolve without a picker, an unlock or a screen. A dish
-    /// planned as two orders stays next until both are logged.
-    func nextUnloggedItem(in plan: RoundPlan, visit: Visit) -> (item: PlannedItem, index: Int)? {
-        let round = currentRound(in: visit)
-        for (index, item) in plan.items.enumerated()
-        where orders(of: item.dishName, in: visit, round: round).count < item.quantity
-            && !isPassed(item.dishName, round: round) {
-            return (item, index)
-        }
-        return nil
-    }
-
-    /// Dishes skipped this round, as `"round|name"`. In memory, like `lastPlan`: a
-    /// pass writes no event, because an order not eaten costs no capacity and is not
-    /// a taste the value loop may learn from.
-    private var passedOrders: Set<String> = []
-
-    private func passKey(_ dishName: String, round: Int) -> String {
-        "\(round)|\(dishName.lowercased())"
-    }
-
-    func isPassed(_ dishName: String, round: Int) -> Bool {
-        passedOrders.contains(passKey(dishName, round: round))
-    }
-
-    /// Eating or rating it after all takes the pass back.
-    func unpass(_ dishName: String, round: Int) {
-        passedOrders.remove(passKey(dishName, round: round))
-    }
-
-    /// Skip means *not this one*. With nothing of it eaten, that is passing on the
-    /// order: no plate, no capacity and no rating, so it stays *0 of 1 eaten*. With a
-    /// plate eaten it is also a real rating of that plate. Either way the dish is done
-    /// for the round, and the next-dish rule moves past it.
-    ///
-    /// Returns what `setRating` returned when a plate was rated, `nil` when the order
-    /// was only passed.
-    @discardableResult
-    func skip(dishName: String, category: MenuCategory, in visit: Visit, roundIndex: Int) -> Bool? {
-        passedOrders.insert(passKey(dishName, round: roundIndex))
-        guard !orders(of: dishName, in: visit, round: roundIndex).isEmpty else { return nil }
-        return setRating(.skip, dishName: dishName, category: category, in: visit, roundIndex: roundIndex)
-    }
-
-    /// Every order of one dish logged in one round, rated or not.
-    func orders(of dishName: String, in visit: Visit, round: Int) -> [TasteEvent] {
-        visit.tasteEvents.filter {
-            $0.roundIndex == round && $0.dishName.caseInsensitiveCompare(dishName) == .orderedSame
-        }
-    }
-
-    /// Undo one plate. The newest unrated one goes first, so the dish keeps its rating
-    /// while any plate of it is still logged; the last plate takes the rating with it.
-    /// Returns `false` when nothing was logged.
-    @discardableResult
-    func removeOrder(of dishName: String, in visit: Visit, round: Int) -> Bool {
-        let logged = orders(of: dishName, in: visit, round: round).sorted { $0.at > $1.at }
-        guard let event = logged.first(where: { !$0.isRated }) ?? logged.first else { return false }
-        // An Action Button correction must not reach for an event that no longer exists.
-        if pendingLog?.event === event { pendingLog = nil }
-        delete(event)
-        return true
-    }
-
-    /// One rating per dish per round. Capacity counts every order, but the value loop
-    /// gets one observation however many plates were eaten — two plates of the same
-    /// dish are not two independent opinions — so rating again replaces it. With
-    /// nothing logged yet, rating is also the log of one order. Returns `true` when an
-    /// earlier rating was replaced.
-    @discardableResult
-    func setRating(_ rating: Rating,
-                   dishName: String,
-                   category: MenuCategory,
-                   in visit: Visit,
-                   roundIndex: Int) -> Bool {
-        let logged = orders(of: dishName, in: visit, round: roundIndex)
-        if let rated = logged.first(where: \.isRated) {
-            rated.ratingRaw = rating.rawValue
-            save()
-            return true
-        }
-        if let unrated = logged.first {
-            unrated.isRated = true
-            unrated.ratingRaw = rating.rawValue
-            save()
-            return false
-        }
-        rate(dishName: dishName, category: category, rating: rating,
-             portion: .normal, in: visit, roundIndex: roundIndex)
-        return false
-    }
-
-    func delete(_ event: TasteEvent) {
-        context.delete(event)
-        save()
-    }
-
-    /// Stop was tapped but no reason given yet. In memory, like `lastPlan`: it is a
-    /// state of the open snippet, not of the meal. `EndMealIntent` carries a required
-    /// `reason` because only a `fullness` ending measures capacity — so the snippet has
-    /// to ask before it can end anything, and this is the asking.
-    var stopRequested = false
-
-    /// Rounds are not persisted, so the current one is the highest logged so far.
-    /// An intent fired from Siri has no view model to ask.
-    func currentRound(in visit: Visit) -> Int {
-        max(1, visit.tasteEvents.map(\.roundIndex).max() ?? 1)
-    }
-
-    func recordFullness(_ value: Int, in visit: Visit) {
-        let reading = FullnessReading(value: value,
-                                      cumulativeSatiety: CapacityEngine.cumulativeSatiety(for: visit))
-        reading.visit = visit
-        context.insert(reading)
-        save()
-    }
-
-    func recordBasisOutcome(basis: ValueBasis, expected: Rating, actual: Rating) {
-        context.insert(BasisRecord(basis: basis,
-                                   expectedScore: expected.score,
-                                   actualScore: actual.score))
-        save()
-    }
-
-    /// `ending` is what the capacity fit reads: only a `fullness` ending is an
-    /// observation of capacity, and every other ending is a lower bound on it.
-    func endVisit(_ visit: Visit, outcome: SessionOutcome, ending: MealEnding = .unknown) {
-        visit.endedAt = .now
-        visit.outcome = outcome
-        visit.endedBecause = ending
-        save()
-    }
+    // MARK: -
 
     func save() {
         try? context.save()
+    }
+
+    private func fetch<T: PersistentModel>(_ descriptor: FetchDescriptor<T>) -> [T] {
+        (try? context.fetch(descriptor)) ?? []
     }
 }

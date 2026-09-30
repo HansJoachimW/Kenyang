@@ -4,9 +4,7 @@ import Foundation
 
 // MARK: - Menu item
 
-/// The type the rest of criterion 3 is built on. Defining it once pays three times:
-/// Shortcuts references it, Siri resolves spoken parameters against it, and Spotlight
-/// indexes it so a search for "sashimi" returns the dish rather than the app.
+/// A dish, for Shortcuts, Siri and Spotlight: a search for "karubi" returns the dish.
 struct MenuItemEntity: AppEntity, IndexedEntity {
     nonisolated static var typeDisplayRepresentation: TypeDisplayRepresentation { "Menu item" }
     static var defaultQuery = MenuItemEntityQuery()
@@ -48,8 +46,6 @@ struct MenuItemEntity: AppEntity, IndexedEntity {
         return DisplayRepresentation(title: "\(name)", subtitle: "\(parts.joined(separator: " · "))")
     }
 
-    /// What the Spotlight result carries. T12's bar is that the tapped result is the
-    /// dish itself — so it has to arrive with its rating and venue attached, not just a name.
     var attributeSet: CSSearchableItemAttributeSet {
         let set = defaultAttributeSet
         set.title = name
@@ -69,22 +65,9 @@ struct MenuItemEntity: AppEntity, IndexedEntity {
 }
 
 struct MenuItemEntityQuery: EntityStringQuery, EntityPropertyQuery {
-    /// A comparator becomes a predicate. There is no SwiftData query behind this —
-    /// the candidate set is one visit's menu, not a database.
     typealias ComparatorMappingType = @Sendable (MenuItemEntity) -> Bool
 
-    @Dependency private var resolved: KenyangStore
-    private let injected: KenyangStore?
-
-    init() { injected = nil }
-
-    /// `@Dependency` resolves only inside the intent perform flow, so a query built by
-    /// hand cannot reach the store. The battery injects one — otherwise T6, T12 and
-    /// T69 could be written but never run, which is the failure `TESTS.md` exists to
-    /// prevent.
-    init(store: KenyangStore) { injected = store }
-
-    private var store: KenyangStore { injected ?? resolved }
+    @Dependency private var store: KenyangStore
 
     static var properties = QueryProperties {
         Property(\MenuItemEntity.$name) {
@@ -112,15 +95,13 @@ struct MenuItemEntityQuery: EntityStringQuery, EntityPropertyQuery {
 
     @MainActor
     func entities(for identifiers: [String]) async throws -> [MenuItemEntity] {
-        let ratings = store.ratingsByDish()
+        let ratings = store.latestRatingByDish()
         return identifiers.flatMap { store.sightings(named: $0).prefix(1) }
             .map { MenuItemEntity.from($0, rating: ratings[$0.name]) }
     }
 
-    /// The design's rule, and it is the whole reason Siri can resolve a mispronounced
-    /// *harami*: match against the items **this meal** is working from — about a
-    /// dozen — not every dish ever seen. No nearest match and no fuzzy accept; an
-    /// unmatched name becomes a question, never a guess.
+    /// Matches only this meal's menu, and never a nearest guess: an unmatched name makes
+    /// Siri ask.
     @MainActor
     func entities(matching string: String) async throws -> [MenuItemEntity] {
         candidates().filter { $0.name.localizedCaseInsensitiveContains(string) }
@@ -157,11 +138,9 @@ struct MenuItemEntityQuery: EntityStringQuery, EntityPropertyQuery {
         return matches
     }
 
-    /// The closed set Siri resolves against: this visit's menu, falling back to
-    /// everything known when no meal is running.
     @MainActor
     private func candidates() -> [MenuItemEntity] {
-        let ratings = store.ratingsByDish()
+        let ratings = store.latestRatingByDish()
         guard let visit = store.activeVisit(), !visit.sightings.isEmpty else { return everything() }
         return visit.sightings
             .map { MenuItemEntity.from($0, rating: ratings[$0.name]) }
@@ -170,7 +149,7 @@ struct MenuItemEntityQuery: EntityStringQuery, EntityPropertyQuery {
 
     @MainActor
     private func everything() -> [MenuItemEntity] {
-        let ratings = store.ratingsByDish()
+        let ratings = store.latestRatingByDish()
         var seen: Set<String> = []
         return store.allSightings()
             .filter { seen.insert($0.name).inserted }
@@ -226,13 +205,7 @@ struct VenueEntity: AppEntity, IndexedEntity {
 }
 
 struct VenueEntityQuery: EntityStringQuery {
-    @Dependency private var resolved: KenyangStore
-    private let injected: KenyangStore?
-
-    init() { injected = nil }
-    init(store: KenyangStore) { injected = store }
-
-    private var store: KenyangStore { injected ?? resolved }
+    @Dependency private var store: KenyangStore
 
     @MainActor
     func entities(for identifiers: [String]) async throws -> [VenueEntity] {
@@ -291,9 +264,7 @@ struct VisitEntity: AppEntity, IndexedEntity {
         return set
     }
 
-    /// `Visit` carries no identifier of its own, and adding a persisted one is a
-    /// migration this branch does not need — B0 is the reminder of what those cost.
-    /// A start instant is unique per meal in practice.
+    /// A meal's start time; `Visit` has no stored identifier.
     static func identifier(for visit: Visit) -> String {
         String(visit.startedAt.timeIntervalSince1970)
     }
@@ -307,13 +278,7 @@ struct VisitEntity: AppEntity, IndexedEntity {
 }
 
 struct VisitEntityQuery: EntityStringQuery {
-    @Dependency private var resolved: KenyangStore
-    private let injected: KenyangStore?
-
-    init() { injected = nil }
-    init(store: KenyangStore) { injected = store }
-
-    private var store: KenyangStore { injected ?? resolved }
+    @Dependency private var store: KenyangStore
 
     @MainActor
     func entities(for identifiers: [String]) async throws -> [VisitEntity] {
@@ -338,8 +303,6 @@ struct VisitEntityQuery: EntityStringQuery {
 
 // MARK: - Category
 
-/// `MenuCategory` is already an `AppEnum`, which makes it a *parameter*. This makes it
-/// a *thing* — indexable in Spotlight and referenceable in Shortcuts on its own.
 struct MenuCategoryEntity: AppEntity, IndexedEntity {
     nonisolated static var typeDisplayRepresentation: TypeDisplayRepresentation { "Category" }
     static var defaultQuery = MenuCategoryEntityQuery()
@@ -388,7 +351,7 @@ struct MenuCategoryEntityQuery: EntityStringQuery {
 extension MealEnding: AppEnum {
     nonisolated static var typeDisplayRepresentation: TypeDisplayRepresentation { "Reason" }
     nonisolated static var caseDisplayRepresentations: [MealEnding: DisplayRepresentation] {
-        [.fullness: "I am full",
+        [.fullness: "I'm full",
          .clock:    "Seating time ran out",
          .closing:  "The place is closing",
          .left:     "The group left",

@@ -5,161 +5,35 @@ import SwiftUI
 @main
 struct KenyangApp: App {
     private let store: KenyangStore
+    private let session: MealSession
+    private let coordinator: RoundCoordinator
 
     init() {
-        let container = KenyangStore.makeContainer()
-        let store = KenyangStore(container: container)
+        let store = KenyangStore(container: KenyangStore.makeContainer())
+        let session = MealSession(store: store, display: LiveActivityController.shared)
+        let coordinator = RoundCoordinator(session: session)
         self.store = store
+        self.session = session
+        self.coordinator = coordinator
+
         AppDependencyManager.shared.add(dependency: store)
+        AppDependencyManager.shared.add(dependency: session)
+        AppDependencyManager.shared.add(dependency: coordinator)
 
-        // A Live Activity button's `perform()` runs in THIS process, so the handler has
-        // to be registered before any of them can fire. `init` is the only place that
-        // is true for a background launch, where there is no scene and no `.task`.
-        MainActor.assumeIsolated {
-            ActivityBridge.shared.register { command in
-                Self.handle(command, store: store)
-            }
-        }
-
-        // Also `init`, and for a stricter reason: `BGTaskScheduler` throws if an
-        // identifier is registered after the app has finished launching.
+        // Both must be registered before launch finishes: a Live Activity button can
+        // launch the app in the background, and BGTaskScheduler rejects late registration.
+        let handler = MealCommandHandler(session: session, coordinator: coordinator)
+        ActivityBridge.shared.register { await handler.handle($0) }
         ProactiveTrigger.registerBackgroundTask()
-    }
-
-    @MainActor
-    private static func handle(_ command: ActivityCommand, store: KenyangStore) {
-        // The only command that is legitimate with no meal running, so it is answered
-        // before the guard rather than inside it.
-        if command == .startSession {
-            guard store.activeVisit() == nil else { return }
-            let visit = store.startVisit(restaurantName: DiningFocus.venueForNewSession(),
-                                         pricePerHead: SessionDefaults.pricePerHead,
-                                         seatingLimitMinutes: SessionDefaults.seatingMinutes,
-                                         maxSatiety: SessionDefaults.maxSatiety)
-            store.addSightings(BuffetMenu.default.items, to: visit)
-            let state = LiveActivityController.state(
-                phase: .planning,
-                capacity: CapacityEngine.state(for: visit),
-                minutesRemaining: visit.minutesRemaining,
-                roundIndex: 1,
-                nextTarget: nil,
-                message: nil)
-            LiveActivityController.shared.start(venue: visit.restaurant?.name ?? "Buffet", state: state)
-            LiveActivityController.shared.publishSnapshot(visit: visit, state: state)
-            return
-        }
-
-        guard let visit = store.activeVisit() else { return }
-        switch command {
-        case .startSession:
-            return // handled above
-        case .stop:
-            // A one-tap Stop cannot know WHY the meal ended, and only a `fullness`
-            // ending measures capacity. Recording `.unknown` keeps it an honest lower
-            // bound instead of feeding the fit an observation nobody made.
-            store.endVisit(visit, outcome: .stopped, ending: .unknown)
-            LiveActivityController.shared.finish(visit: visit, roundIndex: store.currentRound(in: visit))
-        case .rateGood, .rateSkip:
-            // Unlike the Action Button this rates, because the Island names the dish
-            // directly above the buttons — the diner can see what they are answering.
-            // Good is one plate of the target eaten; the rating is the dish's, set or
-            // replaced, so two plates of Karubi are one opinion about Karubi. Skip is
-            // the same rule as the rating row: an uneaten order is passed, not logged.
-            guard let plan = store.lastPlan,
-                  let next = store.nextUnloggedItem(in: plan, visit: visit) else { return }
-            let round = store.currentRound(in: visit)
-            if command == .rateSkip {
-                store.skip(dishName: next.item.dishName,
-                           category: next.item.category,
-                           in: visit,
-                           roundIndex: round)
-            } else {
-                store.rate(dishName: next.item.dishName,
-                           category: next.item.category,
-                           rating: nil,
-                           portion: .normal,
-                           in: visit,
-                           roundIndex: round)
-                store.setRating(.good,
-                                dishName: next.item.dishName,
-                                category: next.item.category,
-                                in: visit,
-                                roundIndex: round)
-            }
-            LiveActivityController.shared.refresh(visit: visit, store: store)
-        }
     }
 
     var body: some Scene {
         WindowGroup {
             RootView()
-                .environment(\.kenyangStore, store)
+                .environment(session)
+                .environment(coordinator)
                 .modelContainer(store.container)
-                .task {
-                    // TESTS.md T50/T51/T52 harness — see Verification/TokenAudit.swift
-                    await SpotlightIndexer.reindex(store)
-
-                    let args = CommandLine.arguments
-                    let all = args.contains("--run-all")
-
-                    // T53 — the capture pipeline against a real menu file. Takes a path,
-                    // so it is deliberately not part of --run-all.
-                    if let flag = args.firstIndex(of: "--capture-probe"), flag + 1 < args.count {
-                        await CaptureProbe.run(path: args[flag + 1])
-                        exit(0)
-                    }
-
-                    if all || args.contains("--verify") {
-                        let runner = VerificationRunner(store: store)
-                        await runner.runAll()
-                        if !all { exit(0) }
-                    }
-                    if all || args.contains("--token-audit") {
-                        await TokenAudit.run()
-                        if !all { exit(0) }
-                    }
-                    if all || args.contains("--stance-probe") {
-                        await StanceProbe.run()
-                        if !all { exit(0) }
-                    }
-                    if all || args.contains("--growth-audit") {
-                        await GrowthAudit.run()
-                        if !all { exit(0) }
-                    }
-                    if all || args.contains("--schema-probe") {
-                        await SchemaProbe.run()
-                        if !all { exit(0) }
-                    }
-                    if all || args.contains("--position-probe") {
-                        await SchemaProbe.positionProbe()
-                        if !all { exit(0) }
-                    }
-                    if all || args.contains("--retry-probe") {
-                        await SchemaProbe.retryProbe()
-                        if !all { exit(0) }
-                    }
-                    if all || args.contains("--branch-battery") {
-                        BranchBattery.stopIsDeterministic()
-                        await BranchBattery.run()
-                        if !all { exit(0) }
-                    }
-                    if all {
-                        print("[RUN-ALL] every harness complete")
-                        fflush(stdout)
-                        exit(0)
-                    }
-                }
+                .task { await SpotlightIndexer.reindex(store) }
         }
-    }
-}
-
-private struct KenyangStoreKey: @preconcurrency EnvironmentKey {
-    @MainActor static let defaultValue = KenyangStore(container: KenyangStore.makeContainer(inMemory: true))
-}
-
-extension EnvironmentValues {
-    var kenyangStore: KenyangStore {
-        get { self[KenyangStoreKey.self] }
-        set { self[KenyangStoreKey.self] = newValue }
     }
 }

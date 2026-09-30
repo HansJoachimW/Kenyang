@@ -1,14 +1,10 @@
 import SwiftUI
 import UIKit
 
-/// The six design tokens, light/dark. Shared because the widget extension renders the
-/// same capacity ring as the app and the icon, and a second copy of these hex values
-/// is a second place for them to drift.
-///
-/// The domain-specific tints — exclusion verdicts, trace kinds — stay in the app's own
-/// `Palette.swift`, because they extend types the extension has no business importing.
+/// The colour tokens, light and dark, shared by the app and the widget extension.
 enum Palette {
     static let surface  = adaptive(light: 0xE5E4E2, dark: 0x0A0A0A)
+    static let raised   = adaptive(light: 0xEFEEEC, dark: 0x1A1A1A)
     static let ink      = adaptive(light: 0x0A0A0A, dark: 0xE5E4E2)
     static let accent   = adaptive(light: 0x536878, dark: 0x7C93A6)
     static let safe     = adaptive(light: 0x4A6147, dark: 0xADBDAB)

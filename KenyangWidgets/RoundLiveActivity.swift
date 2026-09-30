@@ -3,30 +3,21 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-/// The lock-screen bar and all three Dynamic Island presentations.
-///
-/// **They rank rather than shrink.** Expanded carries the target and both actions;
-/// compact drops the target; minimal drops everything but the capacity ring. Each
-/// presentation decides what it can afford to lose, instead of rendering the same
-/// layout at three sizes.
-///
-/// **Never here:** a running total of anything eaten, money, or a progress bar toward a
-/// ceiling that does not exist. The ring shows capacity *remaining*, which counts down.
+/// The Lock Screen bar and the three Dynamic Island presentations. Each keeps what it
+/// has room for: expanded carries the actions, compact the ring and clock, minimal the
+/// ring alone. Never a running total, money, or a bar filling toward a ceiling.
 struct RoundLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: RoundActivityAttributes.self) { context in
-            LockScreenBar(attributes: context.attributes, state: context.state)
+            LockScreenBar(venueName: context.attributes.venueName, state: context.state)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(spacing: 8) {
-                        CapacityRing(fraction: context.state.fractionRemaining)
-                            .frame(width: 26, height: 26)
+                        CapacityRing(fraction: context.state.fractionRemaining).frame(width: 26, height: 26)
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(context.state.platesText)
-                                .font(.caption.weight(.medium))
-                            Text("Round \(context.state.roundIndex)")
-                                .font(.caption2).foregroundStyle(Palette.muted)
+                            Text(context.state.platesText).font(.caption.weight(.medium))
+                            Text("Round \(context.state.round)").font(.caption2).foregroundStyle(Palette.muted)
                         }
                     }
                 }
@@ -39,125 +30,106 @@ struct RoundLiveActivity: Widget {
                     }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    ExpandedBottom(state: context.state)
+                    MealActions(state: context.state)
                 }
             } compactLeading: {
-                CapacityRing(fraction: context.state.fractionRemaining, lineWidth: 4)
-                    .frame(width: 18, height: 18)
+                CapacityRing(fraction: context.state.fractionRemaining, lineWidth: 4).frame(width: 18, height: 18)
             } compactTrailing: {
-                // Compact drops the target and keeps the clock, because the clock is the
-                // half the diner cannot recover by looking at their own plate.
                 if let minutes = context.state.minutesText {
                     Text(minutes).font(.caption2.weight(.medium)).foregroundStyle(Palette.accent)
                 }
             } minimal: {
-                CapacityRing(fraction: context.state.fractionRemaining, lineWidth: 4)
-                    .frame(width: 18, height: 18)
+                CapacityRing(fraction: context.state.fractionRemaining, lineWidth: 4).frame(width: 18, height: 18)
             }
             .keylineTint(Palette.accent)
         }
     }
 }
 
-/// The two working buttons, and what they are rating.
-///
-/// The design says *"Rate and Stop as real buttons"*. A single **Rate** would have to
-/// mean *good*, and an app whose whole stance is "stop before you regret it" cannot
-/// ship a one-tap control that can only say the food was excellent. So the two buttons
-/// are **Good** and **Skip** — a real rating with a real negative — and Stop lives on
-/// the lock-screen bar, which has the room for it.
-///
-/// Unlike the Action Button, this rates: the dish is named right above the buttons, so
-/// the diner can see what they are answering about. That is the whole difference.
-private struct ExpandedBottom: View {
+/// What the diner can do right now, so a meal can go on without opening the app.
+private struct MealActions: View {
     let state: RoundActivityAttributes.ContentState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let message = state.message {
-                Text(message).font(.caption).foregroundStyle(Palette.ink)
+                Text(message).font(.caption).lineLimit(2)
             }
-            if let target = state.nextTarget {
-                Text(target).font(.subheadline.weight(.medium)).lineLimit(1)
-                HStack(spacing: 8) {
-                    Button(intent: RateTargetGoodIntent()) {
-                        Label("Good", systemImage: "hand.thumbsup")
-                    }
-                    Button(intent: RateTargetSkipIntent()) {
-                        Label("Skip", systemImage: "hand.thumbsdown")
-                    }
+            switch state.phase {
+            case .planning:
+                Text("Planning round \(state.round)…").font(.subheadline)
+            case .suggested:
+                suggestion
+            case .eating:
+                if let dish = state.nextDish {
+                    Text(dish).font(.subheadline.weight(.medium)).lineLimit(1)
+                    buttons(.good, .skip)
                 }
-                .buttonStyle(.bordered)
-                .font(.caption)
+            case .roundDone:
+                Text("Round \(state.round) done").font(.subheadline.weight(.medium))
+                buttons(.nextRound, .endMeal)
+            case .timeToStop:
+                buttons(.endMeal)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
-}
 
-/// The lock-screen bar, in the same four states as the Island.
-private struct LockScreenBar: View {
-    let attributes: RoundActivityAttributes
-    let state: RoundActivityAttributes.ContentState
-
-    /// The system resolves `activityBackgroundTint` outside this view, so an adaptive
-    /// token there can land on light while the text lands on dark — light on light on
-    /// the bright Lock Screen. Both are resolved here, against the same environment.
-    @Environment(\.self) private var environment
-
-    var body: some View {
-        let surface = Color(Palette.surface.resolve(in: environment))
-        let ink = Color(Palette.ink.resolve(in: environment))
-
-        HStack(spacing: 16) {
-            CapacityRing(fraction: state.fractionRemaining)
-                .frame(width: 44, height: 44)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(attributes.venueName)
-                        .font(.footnote.weight(.medium))
-                        .lineLimit(1)
-                    Text(PhaseLabel.word(for: state.phase))
-                        .font(.caption2)
-                        .foregroundStyle(Palette.muted)
-                }
-                Text("\(state.platesText) left · round \(state.roundIndex)")
-                    .font(.caption).foregroundStyle(Palette.muted)
-
-                if let message = state.message {
-                    Text(message).font(.caption).foregroundStyle(Palette.ink).lineLimit(2)
-                } else if let target = state.nextTarget {
-                    Text("Next: \(target)").font(.caption).foregroundStyle(Palette.ink).lineLimit(1)
-                }
+    @ViewBuilder
+    private var suggestion: some View {
+        Text(state.suggestion.joined(separator: " · ")).font(.subheadline.weight(.medium)).lineLimit(2)
+        if let question = state.question {
+            Text("Ask staff: does \(question.dish) contain \(question.ingredient)?").font(.caption)
+            HStack(spacing: 8) {
+                Button(intent: IngredientAnswerIntent(dish: question.dish, ingredient: question.ingredient, contains: false)) { Text("No") }
+                Button(intent: IngredientAnswerIntent(dish: question.dish, ingredient: question.ingredient, contains: true)) { Text("Yes") }
             }
+            .buttonStyle(.bordered)
+            .font(.caption)
+        } else {
+            buttons(.orderRound, .anotherRound)
+        }
+    }
 
-            Spacer(minLength: 0)
-
-            VStack(spacing: 4) {
-                if let minutes = state.minutesText {
-                    Text(minutes).font(.caption2.weight(.medium)).foregroundStyle(Palette.accent)
-                }
-                Button(intent: StopFromActivityIntent()) { Text("Stop") }
-                    .buttonStyle(.bordered)
-                    .font(.caption2)
+    private func buttons(_ actions: MealAction...) -> some View {
+        HStack(spacing: 8) {
+            ForEach(actions, id: \.self) { action in
+                Button(action.label, intent: MealButtonIntent(action))
             }
         }
-        .padding(16)
-        .foregroundStyle(ink)
-        .activityBackgroundTint(surface)
-        .activitySystemActionForegroundColor(ink)
+        .buttonStyle(.bordered)
+        .font(.caption)
     }
 }
 
-/// Colour is never the only indicator — every state carries a word.
-private enum PhaseLabel {
-    static func word(for phase: RoundActivityAttributes.Phase) -> String {
-        switch phase {
-        case .planning:  "planning"
-        case .active:    "eating"
-        case .stopGuard: "time to stop"
-        case .degraded:  "no model"
+private struct LockScreenBar: View {
+    let venueName: String
+    let state: RoundActivityAttributes.ContentState
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            CapacityRing(fraction: state.fractionRemaining).frame(width: 44, height: 44)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(venueName).font(.footnote.weight(.medium)).lineLimit(1)
+                    Text(state.phase.label).font(.caption2).foregroundStyle(Palette.muted)
+                    Spacer(minLength: 0)
+                    if let minutes = state.minutesText {
+                        Text(minutes).font(.caption2.weight(.medium)).foregroundStyle(Palette.accent)
+                    }
+                    if state.phase != .roundDone && state.phase != .timeToStop {
+                        Button(MealAction.endMeal.label, intent: MealButtonIntent(.endMeal))
+                            .buttonStyle(.bordered)
+                            .font(.caption2)
+                    }
+                }
+                Text("\(state.platesText) left · round \(state.round)").font(.caption).foregroundStyle(Palette.muted)
+                MealActions(state: state)
+            }
         }
+        .padding(16)
+        .foregroundStyle(Palette.ink)
+        .activityBackgroundTint(Palette.surface)
+        .activitySystemActionForegroundColor(Palette.ink)
     }
 }

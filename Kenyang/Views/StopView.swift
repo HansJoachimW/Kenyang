@@ -1,47 +1,29 @@
 import SwiftUI
 
-/// Screen 6 — Stop. Unprompted, and in accent rather than red.
-///
-/// Red would file the app's proudest behaviour as an error. Weight and placement carry
-/// the emphasis instead: 40 pt at the top of the screen with nothing competing.
-///
-/// **The threshold sits next to the reading.** The model chose `stop` zero times out of
-/// three when handed exhausted capacity, so this fires deterministically — and printing
-/// both numbers is what makes *"computed, not chosen"* checkable rather than claimed.
-///
-/// **"Keep going anyway" is plain, available text.** Not a button, not greyed out, not
-/// behind a confirmation. The diner is in control, the app does not argue, and the
-/// choice is not made to feel like a transgression.
+/// Stopping is the app working, so it uses the accent, never red, and "keep going" is
+/// always one plain tap away.
 struct StopView: View {
-    let model: SessionViewModel
-    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 40
+    let model: MealViewModel
+    let reason: StopReason
+    @ScaledMetric(relativeTo: .largeTitle) private var headlineSize: CGFloat = 40
+    @State private var isAskingWhy = false
 
-    @State private var askingReason = false
+    private var visit: Visit? { model.session.visit }
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("STOP GUARD · COMPUTED, NOT CHOSEN")
-                        .font(.caption.weight(.semibold)).tracking(0.6)
-                        .foregroundStyle(Palette.accent)
-
+                    SectionLabel("Worked out from your numbers, not the AI")
                     Text(headline)
-                        .font(.system(size: heroSize, weight: .bold))
+                        .font(.system(size: headlineSize, weight: .bold))
                         .foregroundStyle(Palette.ink)
-
-                    Text(StopGuard.detail(for: model.stopReason))
-                        .font(.body)
-                        .foregroundStyle(Palette.ink)
-
+                    Text(StopGuard.detail(for: reason)).foregroundStyle(Palette.ink)
                     Divider()
                     readings
-
-                    if askingReason {
-                        reasonQuestion
+                    if isAskingWhy {
+                        whyItEnded
                     } else {
-                        // Money is stated once, after the fact. It is not a reason to
-                        // continue — the venue charges for what is left uneaten either way.
                         Text("Stated once, after the fact. It is not a reason to continue.")
                             .font(.caption)
                             .foregroundStyle(Palette.muted)
@@ -49,15 +31,13 @@ struct StopView: View {
                 }
                 .padding(24)
             }
-            actions
+            if !isAskingWhy { actions }
         }
         .background(Palette.surface)
     }
 
-    // MARK: -
-
     private var headline: String {
-        switch model.stopReason {
+        switch reason {
         case .capacityExhausted: "Stop here."
         case .seatingTimeOver:   "Seating time is up."
         case .lastOrderPassed:   "Last order has passed."
@@ -65,98 +45,60 @@ struct StopView: View {
         }
     }
 
+    @ViewBuilder
     private var readings: some View {
-        VStack(spacing: 8) {
-            reading("Capacity remaining", percent(model.capacity.fractionRemaining))
-            if model.stopReason == .capacityExhausted {
-                reading("Threshold", percent(CapacityState.exhaustionThreshold))
+        if let visit {
+            let capacity = CapacityEngine.state(for: visit)
+            VStack(spacing: 8) {
+                LabeledContent("Room left", value: capacity.fractionRemaining.formatted(.percent.precision(.fractionLength(0))))
+                if reason == .capacityExhausted {
+                    LabeledContent("Stop below", value: CapacityState.exhaustionThreshold.formatted(.percent))
+                }
+                if let minutes = visit.minutesRemaining {
+                    LabeledContent("Seating left", value: "\(minutes) min")
+                }
+                LabeledContent("Rounds this meal", value: "\(model.session.round)")
+                LabeledContent("Ordered", value: "Rp \(BreakEven.recovered(events: visit.tasteEvents).formatted(.number.precision(.fractionLength(0)))) of \(visit.pricePerHead.formatted(.number.precision(.fractionLength(0))))")
             }
-            if let minutes = model.minutesRemaining {
-                reading("Seating left", "\(minutes) min")
-            }
-            reading("Rounds this meal", "\(model.roundIndex)")
-            reading("Ordered", model.orderedAgainstCover)
+            .font(.subheadline.monospacedDigit())
+            .foregroundStyle(Palette.ink)
         }
     }
 
-    private func reading(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label).font(.subheadline).foregroundStyle(Palette.ink)
-            Spacer()
-            Text(value).font(.subheadline.monospaced()).foregroundStyle(Palette.ink)
-        }
-    }
-
-    private func percent(_ fraction: Double) -> String {
-        "\(Int((fraction * 100).rounded()))%"
-    }
-
-    /// The last of the meal's three permitted interruptions. Without it the capacity fit
-    /// averages censored visits and biases itself downward, silently, worse the more the
-    /// app is used.
-    private var reasonQuestion: some View {
+    private var whyItEnded: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("ONE QUESTION, THE LAST OF THREE")
-                .font(.caption.weight(.semibold)).tracking(0.6)
-                .foregroundStyle(Palette.accent)
+            SectionLabel("One last question")
             Text("Why did the meal end?")
                 .font(.title3.weight(.medium))
                 .foregroundStyle(Palette.ink)
-
             FlowRow(spacing: 8) {
                 ForEach(MealEnding.offered, id: \.self) { ending in
-                    Button(ending.chipLabel) { model.endMeal(reason: ending) }
-                        .font(.subheadline.weight(.medium))
+                    Button(ending.label) { model.endMeal(because: ending) }
                         .buttonStyle(.bordered)
-                        .tint(Palette.accent)
                 }
             }
-
-            Text("A meal that ended on the clock is a lower bound on your capacity, not a reading of it. Kenyang will let it raise the estimate, never lower it.")
+            Text("Only \u{201C}I'm full\u{201D} tells Kenyang how much you can eat. The others mean you could have eaten more, so they can raise its estimate but never lower it.")
                 .font(.caption)
                 .foregroundStyle(Palette.muted)
         }
     }
 
-    @ViewBuilder
     private var actions: some View {
-        if askingReason {
-            EmptyView()
-        } else {
-            VStack(spacing: 12) {
-                Button { askingReason = true } label: {
-                    Text("End the meal").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Palette.accent)
-                .controlSize(.large)
-
-                HStack {
-                    Button("Keep going anyway") { model.keepGoing() }
-                    Spacer()
-                    Button("Why this fired") { model.showTrace = true }
-                }
-                .font(.subheadline)
-                .tint(Palette.accent)
+        VStack(spacing: 12) {
+            Button { isAskingWhy = true } label: {
+                Text("End the meal").frame(maxWidth: .infinity)
             }
-            .padding(24)
-            .background(Palette.surface)
-        }
-    }
-}
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
 
-extension MealEnding {
-    /// The four the diner is offered. `unknown` is what a meal gets when nobody asked —
-    /// it is a state, not a choice.
-    static var offered: [MealEnding] { [.fullness, .clock, .closing, .left] }
-
-    var chipLabel: String {
-        switch self {
-        case .fullness: "full"
-        case .clock:    "the clock"
-        case .closing:  "closing"
-        case .left:     "the group left"
-        case .unknown:  "some other reason"
+            HStack {
+                Button("Keep going anyway", action: model.keepGoing)
+                Spacer()
+                Button("See why") { model.isShowingTrace = true }
+            }
+            .font(.subheadline)
         }
+        .padding(24)
+        .background(Palette.surface)
     }
 }
