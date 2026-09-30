@@ -52,6 +52,7 @@ enum MealSnapshotStore {
         guard let defaults, let data = try? JSONEncoder().encode(snapshot) else { return }
         defaults.set(data, forKey: key)
         WidgetCenter.shared.reloadAllTimelines()
+        ControlCenter.shared.reloadAllControls()
     }
 
     static func read() -> MealSnapshot? {

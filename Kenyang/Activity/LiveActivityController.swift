@@ -10,7 +10,14 @@ import Foundation
 final class LiveActivityController {
     static let shared = LiveActivityController()
 
-    private var activity: Activity<RoundActivityAttributes>?
+    /// Asked of ActivityKit rather than remembered. A relaunch lost the remembered one
+    /// while the activity itself stayed up, so nothing could end it and the next
+    /// `syncActivity` started a second.
+    private var activity: Activity<RoundActivityAttributes>? {
+        Activity<RoundActivityAttributes>.activities.first {
+            $0.activityState == .active || $0.activityState == .stale
+        }
+    }
 
     private init() {}
 
@@ -23,7 +30,7 @@ final class LiveActivityController {
 
     func start(venue: String, state: RoundActivityAttributes.ContentState) {
         guard isPermitted, activity == nil else { return }
-        activity = try? Activity.request(
+        _ = try? Activity.request(
             attributes: RoundActivityAttributes(venueName: venue),
             content: ActivityContent(state: state, staleDate: nil)
         )
@@ -34,10 +41,27 @@ final class LiveActivityController {
         Task { await activity.update(ActivityContent(state: state, staleDate: nil)) }
     }
 
-    func end(_ finalState: RoundActivityAttributes.ContentState) {
-        guard let activity else { return }
-        self.activity = nil
-        Task { await activity.end(ActivityContent(state: finalState, staleDate: nil), dismissalPolicy: .default) }
+    /// Every activity goes, not only the newest, and **immediately**: the activity is
+    /// for a meal in progress. `.default` kept an ended meal on the Lock Screen for up
+    /// to four hours.
+    func end() {
+        for activity in Activity<RoundActivityAttributes>.activities {
+            Task { await activity.end(nil, dismissalPolicy: .immediate) }
+        }
+    }
+
+    /// The meal is over: take the activity down and tell the widget. Call after
+    /// `endVisit`, so the snapshot records `isActive: false`. The widget does not
+    /// dismiss itself, and without the snapshot it would keep showing the ended meal.
+    func finish(visit: Visit, roundIndex: Int) {
+        end()
+        let ended = Self.state(phase: .stopGuard,
+                               capacity: CapacityEngine.state(for: visit),
+                               minutesRemaining: visit.minutesRemaining,
+                               roundIndex: roundIndex,
+                               nextTarget: nil,
+                               message: "Meal ended.")
+        publishSnapshot(visit: visit, state: ended)
     }
 
     /// Recompute from the store alone. The view model owns the richer version; this is

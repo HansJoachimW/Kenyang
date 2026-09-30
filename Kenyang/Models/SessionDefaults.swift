@@ -6,17 +6,13 @@ import Foundation
 /// battery — `250_000` in three files, `90` in five, `maxSatiety: 9` in seven, some
 /// written as `3 * CapacityEngine.platesToSatiety` and some as a bare `9`.
 ///
-/// They are **defaults, not constants**: price and tier are captured per venue and
-/// already persist on `Restaurant`, and the diner can change any of them before the
-/// meal starts. Seating limit is the exception — it is printed on the menu ("Table 90
-/// minutes") and so is a property of the venue that the schema does not yet hold.
+/// Price and seating come from `BuffetMenu.default`, the menu every session starts from.
 enum SessionDefaults {
-    /// Rupiah per head. A Gyu-Kaku Standard adult cover, used only until a captured
-    /// menu supplies the real figure.
-    static let pricePerHead: Double = 250_000
+    /// Rupiah per head, from the default menu.
+    static var pricePerHead: Double { BuffetMenu.default.pricePerHead }
 
-    /// Minutes at the table. Both venues in scope print 90.
-    static let seatingMinutes = 90
+    /// Minutes at the table, from the default menu.
+    static var seatingMinutes: Int { BuffetMenu.default.seatingMinutes }
 
     /// Coarse onboarding prior — `BUFFET.md` §6 layer 0.
     static let plates: Double = 3

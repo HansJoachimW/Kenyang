@@ -2,26 +2,21 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-/// Start a meal from Control Center or the Lock Screen.
+/// Open the app from Control Center or the Lock Screen.
 ///
-/// `BUFFET.md` §10 makes this the arrival gesture: *Control Center: start session → Live
-/// Activity begins*. The demo script leans on it — you sit down and there is no capture
-/// step, because the menu is already stored.
-///
-/// The control reads `MealSnapshotStore` so it can say whether a meal is already running
-/// rather than offering "Start a meal" during one. That read is why the App Group had to
-/// land first: without it `MealSnapshotStore.read()` is nil and the control falls back to
-/// its idle label, which is wrong but not broken.
+/// Starting and ending a meal is the home-screen widget's job; this control opens the
+/// app and nothing more. It reads `MealSnapshotStore` so its label names the venue while
+/// a meal is running.
 struct StartSessionControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "KenyangStartSession",
                                    provider: MealStateProvider()) { state in
-            ControlWidgetButton(action: StartSessionControlIntent()) {
+            ControlWidgetButton(action: OpenKenyangIntent()) {
                 Label(state.label, systemImage: state.isActive ? "circle.dotted" : "fork.knife")
             }
         }
-        .displayName("Start a meal")
-        .description("Begin a buffet session and start the Live Activity.")
+        .displayName("Open Kenyang")
+        .description("Open the app, or return to the meal in progress.")
     }
 }
 
@@ -31,11 +26,11 @@ struct MealStateProvider: ControlValueProvider {
         var label: String
     }
 
-    let previewValue = Value(isActive: false, label: "Start a meal")
+    let previewValue = Value(isActive: false, label: "Kenyang")
 
     func currentValue() async throws -> Value {
         guard let snapshot = MealSnapshotStore.read(), snapshot.isActive else {
-            return Value(isActive: false, label: "Start a meal")
+            return Value(isActive: false, label: "Kenyang")
         }
         return Value(isActive: true, label: snapshot.venueName)
     }

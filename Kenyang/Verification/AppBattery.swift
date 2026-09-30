@@ -530,7 +530,7 @@ final class VerificationRunner {
         // `ingredientsKnown` by hand; nothing in the shipping app ever does, so one
         // exclusion resolved every real dish to `unknown`, the planner filtered to
         // `safe`, and the agent returned an empty plan with nothing said about it.
-        let realPath = DemoSpread.standard.map {
+        let realPath = FixtureSpread.standard.map {
             DishSighting(name: $0.name, category: $0.category,
                          printedCategory: $0.printed, tierRank: $0.tier)
         }
@@ -555,7 +555,7 @@ final class VerificationRunner {
         emit("only a dish the ratings back may be ordered again, and every order is")
         emit("priced at the plate the diner will actually be served.")
 
-        let spread = DemoSpread.standard.map {
+        let spread = FixtureSpread.standard.map {
             DishSighting(name: $0.name, category: $0.category,
                          printedCategory: $0.printed, tierRank: $0.tier)
         }
@@ -624,7 +624,7 @@ final class VerificationRunner {
             emit("\(moves && refusesSame ? "✅" : "❌") \(direction?.label ?? "no reason"): unchanged refused · fallback → recon=\(stepped.reconShare.rawValue) posture=\(stepped.riskPosture.rawValue)")
         }
 
-        let spread = DemoSpread.standard.map {
+        let spread = FixtureSpread.standard.map {
             DishSighting(name: $0.name, category: $0.category,
                          printedCategory: $0.printed, tierRank: $0.tier)
         }
@@ -713,7 +713,29 @@ final class VerificationRunner {
         let floor = model.ordersEaten(tuna) == 0
         emit("\(floor ? "✅" : "❌") − ×2 on 1 plate → \(model.ordersEaten(tuna)) eaten, never below zero")
 
-        let pass = once && split && capped && keepsRating && floor
+        // Skip on an order nobody ate is a pass. Found by tapping it: skip logged a
+        // plate, so the dish read 1 of 1 eaten and capacity went down.
+        let edamame = PlannedItem(dishName: "Edamame", category: .vegetable, portion: .normal,
+                                  isRecon: true, satietyCost: 0.6, quantity: 1)
+        let spentBefore = CapacityEngine.state(for: visit).spent
+        model.rate(edamame, rating: .skip)
+        let spentAfter = CapacityEngine.state(for: visit).spent
+        let passed = model.ordersEaten(edamame) == 0 && model.rating(of: edamame) == .skip
+            && spentAfter == spentBefore && !scratch.orders(of: "Edamame", in: visit, round: 1).contains(where: \.isRated)
+        emit("\(passed ? "✅" : "❌") skip before eating → \(model.ordersEaten(edamame)) of 1 eaten, spent \(spentBefore) → \(spentAfter), no rating written")
+
+        // The Island and the Action Button move past a passed dish.
+        let plan = RoundPlan(items: [edamame, tuna], rationale: "", reconShare: .half, posture: .balanced)
+        let next = scratch.nextUnloggedItem(in: plan, visit: visit)?.item.dishName
+        let movesOn = next == "Tuna Nigiri"
+        emit("\(movesOn ? "✅" : "❌") next dish after a pass → \(next ?? "none") (expected Tuna Nigiri)")
+
+        // Eating it after all takes the pass back.
+        model.logOrder(edamame)
+        let unpassed = model.ordersEaten(edamame) == 1 && model.rating(of: edamame) == nil
+        emit("\(unpassed ? "✅" : "❌") Ate one after a skip → \(model.ordersEaten(edamame)) of 1, pass withdrawn")
+
+        let pass = once && split && capped && keepsRating && floor && passed && movesOn && unpassed
         emit("one rating per dish per round: \(pass ? "PASS" : "FAIL")")
         emit("")
     }
@@ -728,7 +750,7 @@ final class VerificationRunner {
         // maxRounds 0 exhausts on the first beginRound(), so this costs no model calls
         // and reproduces round 7 exactly.
         let agent = RoundAgent(trace: trace, budget: LoopBudget(maxRounds: 0))
-        let spread = DemoSpread.standard.map {
+        let spread = FixtureSpread.standard.map {
             DishSighting(name: $0.name, category: $0.category,
                          printedCategory: $0.printed, tierRank: $0.tier)
         }
@@ -1112,7 +1134,7 @@ final class VerificationRunner {
         emit("\(reopens ? "✅" : "❌") a NEW exclusion re-opens a dish already cleared")
 
         // And it must actually reach a plan, which is the half that was missing.
-        let spread = DemoSpread.standard.map {
+        let spread = FixtureSpread.standard.map {
             DishSighting(name: $0.name, category: $0.category,
                          printedCategory: $0.printed, tierRank: $0.tier)
         }
@@ -1135,7 +1157,7 @@ final class VerificationRunner {
                                        pricePerHead: SessionDefaults.pricePerHead,
                                        seatingLimitMinutes: SessionDefaults.seatingMinutes,
                                        maxSatiety: SessionDefaults.maxSatiety)
-        scratch.addSightings(DemoSpread.standard, to: visit)
+        scratch.addSightings(FixtureSpread.standard, to: visit)
         scratch.addExclusion("peanut")
         model.visit = visit
         model.phase = .awaitingApproval
@@ -1184,7 +1206,7 @@ final class VerificationRunner {
         // On 27 `.required` means the framework will not answer without consulting a
         // tool. On 26.5 the same call is only ever asked to. Either way the assertion
         // is the same one, and only one of them is a guarantee.
-        let spread = DemoSpread.standard.map {
+        let spread = FixtureSpread.standard.map {
             DishSighting(name: $0.name, category: $0.category,
                          printedCategory: $0.printed, tierRank: $0.tier)
         }
@@ -1454,7 +1476,7 @@ final class VerificationRunner {
         // ── T65 — the ordinal fallback
         emit("")
         emit("④ the ordinal fallback — a full round on five coarse states")
-        let spread = DemoSpread.standard.map {
+        let spread = FixtureSpread.standard.map {
             DishSighting(name: $0.name, category: $0.category,
                          printedCategory: $0.printed, tierRank: $0.tier)
         }
@@ -1484,7 +1506,7 @@ final class VerificationRunner {
 
     private func minorSurfacesAreWired() {
         emit("──── the minor surfaces are wired  ·  TESTS.md T15 · T16 · T17 ────")
-        emit("Control Center, the Focus filter and the widget all reach the app through")
+        emit("The widget, Control Center and the Focus filter all reach the app through")
         emit("the App Group. Rendering is a device check; what is checkable here is that")
         emit("each one has something real on the other end of it.")
 
@@ -1497,21 +1519,26 @@ final class VerificationRunner {
         emit("\(grouped ? "✅" : "❌") App Group \(MealSnapshotStore.appGroup) → \(grouped ? "resolved" : "NOT CONFIGURED — tick App Groups on both targets")")
 
         // T16 — the focus filter's only observable consequence.
+        // Pinned to a venue that is NOT the fallback, or the check passes either way.
         let previous = DiningFocus.venueName
-        DiningFocus.venueName = "Gyu-Kaku"
-        let pinned = DiningFocus.venueForNewSession() == "Gyu-Kaku"
+        DiningFocus.venueName = "Mashu"
+        let pinned = DiningFocus.venueForNewSession() == "Mashu"
         DiningFocus.venueName = nil
-        let unpinned = DiningFocus.venueForNewSession() == "Demo Buffet"
+        let unpinned = DiningFocus.venueForNewSession() == BuffetMenu.default.venueName
         DiningFocus.venueName = previous
         checks.append(("a pinned venue is used", pinned))
         checks.append(("no focus falls back", unpinned))
-        emit("\(pinned ? "✅" : "❌") focus pins Gyu-Kaku → a new session starts there")
-        emit("\(unpinned ? "✅" : "❌") focus off → falls back, the filter is not load-bearing")
+        emit("\(pinned ? "✅" : "❌") focus pins Mashu → a new session starts there")
+        emit("\(unpinned ? "✅" : "❌") focus off → falls back to \(BuffetMenu.default.venueName), the filter is not load-bearing")
 
-        // T15 — a control that opens the app is a shortcut with extra steps.
-        let controlStaysOut = !StartSessionControlIntent.openAppWhenRun
-        checks.append(("the control does not open the app", controlStaysOut))
-        emit("\(controlStaysOut ? "✅" : "❌") StartSessionControlIntent.openAppWhenRun = \(StartSessionControlIntent.openAppWhenRun)")
+        // T15 — the widget starts and ends a meal without opening the app; the Control
+        // Center control only opens it.
+        let widgetStaysOut = !StartMealFromWidgetIntent.openAppWhenRun && !StopFromActivityIntent.openAppWhenRun
+        let controlOpens = OpenKenyangIntent.openAppWhenRun
+        checks.append(("the widget's Start and End do not open the app", widgetStaysOut))
+        checks.append(("the control opens the app", controlOpens))
+        emit("\(widgetStaysOut ? "✅" : "❌") widget Start/End openAppWhenRun = \(StartMealFromWidgetIntent.openAppWhenRun)/\(StopFromActivityIntent.openAppWhenRun)")
+        emit("\(controlOpens ? "✅" : "❌") OpenKenyangIntent.openAppWhenRun = \(OpenKenyangIntent.openAppWhenRun)")
 
         // T17 — the defect this check exists for. The Live Activity dismisses itself when
         // a meal ends; the widget does not, so an ended meal kept rendering its remaining
@@ -1614,7 +1641,7 @@ final class VerificationRunner {
         emit("Principle 29: replace the objective with a constant. If the plan is")
         emit("identical, the agent is decorative.")
 
-        let spread = DemoSpread.standard.map {
+        let spread = FixtureSpread.standard.map {
             DishSighting(name: $0.name, category: $0.category,
                          printedCategory: $0.printed, tierRank: $0.tier)
         }
@@ -1646,7 +1673,7 @@ final class VerificationRunner {
             emit("⚠️ model unavailable — skipped"); emit(""); return
         }
 
-        let spread = DemoSpread.standard.map {
+        let spread = FixtureSpread.standard.map {
             DishSighting(name: $0.name, category: $0.category,
                          printedCategory: $0.printed, tierRank: $0.tier)
         }
@@ -1692,7 +1719,7 @@ final class VerificationRunner {
 
     private func hypothesisPivots() async {
         emit("──── a contradicted hypothesis pivots ⭐  ·  TESTS.md T35 ────")
-        let spread = DemoSpread.standard.map {
+        let spread = FixtureSpread.standard.map {
             DishSighting(name: $0.name, category: $0.category,
                          printedCategory: $0.printed, tierRank: $0.tier)
         }
@@ -1735,7 +1762,7 @@ final class VerificationRunner {
 
     private func pathVaries() async {
         emit("──── different data takes different paths ⭐  ·  TESTS.md T34 ────")
-        let spread = DemoSpread.standard.map {
+        let spread = FixtureSpread.standard.map {
             DishSighting(name: $0.name, category: $0.category,
                          printedCategory: $0.printed, tierRank: $0.tier)
         }

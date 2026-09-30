@@ -12,7 +12,11 @@ struct RootView: View {
             } else if let model {
                 SessionView(model: model)
             } else {
-                ProgressView().task { model = SessionViewModel(store: store) }
+                ProgressView().task {
+                    let launched = SessionViewModel(store: store)
+                    launched.endStaleActivity()
+                    model = launched
+                }
             }
         }
     }
@@ -56,7 +60,10 @@ struct SessionView: View {
                 VerificationView(trace: model.trace)
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { model.reconcileWithStore() }
+                if phase == .active {
+                    model.reconcileWithStore()
+                    model.endStaleActivity()
+                }
             }
         }
         // Blue Slate is the only fill the design allows, so no control may fall back to
@@ -92,13 +99,13 @@ struct StartView: View {
                 .font(.footnote)
                 .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(.center)
-            Button("Start a demo session") {
+            Button("Start a meal at \(BuffetMenu.default.venueName)") {
                 pendingStart = {
-                    model.startSession(restaurantName: "Demo Buffet",
+                    model.startSession(restaurantName: BuffetMenu.default.venueName,
                                        pricePerHead: SessionDefaults.pricePerHead,
                                        seatingLimit: SessionDefaults.seatingMinutes,
                                        plates: plates,
-                                       spread: DemoSpread.standard)
+                                       spread: BuffetMenu.default.items)
                 }
                 checkingAvoidList = true
             }
@@ -134,7 +141,7 @@ struct StartView: View {
                                        pricePerHead: venue.tierPrice(rank: rank) ?? venue.pricePerHead,
                                        seatingLimit: SessionDefaults.seatingMinutes,
                                        plates: plates,
-                                       spread: DemoSpread.standard)
+                                       spread: BuffetMenu.default.items)
                 }
                 tierVenue = nil
             } onOverride: {
@@ -447,25 +454,3 @@ struct TerminalView: View {
     }
 }
 
-
-enum DemoSpread {
-    static let tierNames = ["Standard", "Premium"]
-
-    static let standard: [(name: String, category: MenuCategory, printed: String, tier: Int)] = [
-        ("Wagyu Karubi", .meat, "PREMIUM MEAT", 1),
-        ("Prime Rib Eye", .meat, "PREMIUM MEAT", 1),
-        ("Gyu-Kaku Karubi", .meat, "STANDARD MEAT", 0),
-        ("Beef Harami", .meat, "STANDARD MEAT", 0),
-        ("Pork Belly Shio", .meat, "STANDARD MEAT", 0),
-        ("Salmon Nigiri", .raw, "SUSHI", 0),
-        ("Tuna Nigiri", .raw, "SUSHI", 0),
-        ("Chicken Karaage", .fried, "APPETIZER & AGEMONO", 0),
-        ("Ebi Fry", .fried, "APPETIZER & AGEMONO", 0),
-        ("Garlic Rice", .starch, "RICE & NOODLE", 0),
-        ("Yaki Udon", .starch, "RICE & NOODLE", 0),
-        ("Miso Soup", .soup, "SOUP", 0),
-        ("Kaisou Salad", .vegetable, "SALAD", 0),
-        ("Grilled Corn", .vegetable, "GRILL APPETIZER", 0),
-        ("Matcha Ice Cream", .dessert, "DESSERT", 0)
-    ]
-}

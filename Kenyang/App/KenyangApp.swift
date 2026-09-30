@@ -36,7 +36,7 @@ struct KenyangApp: App {
                                          pricePerHead: SessionDefaults.pricePerHead,
                                          seatingLimitMinutes: SessionDefaults.seatingMinutes,
                                          maxSatiety: SessionDefaults.maxSatiety)
-            store.addSightings(DemoSpread.standard, to: visit)
+            store.addSightings(BuffetMenu.default.items, to: visit)
             let state = LiveActivityController.state(
                 phase: .planning,
                 capacity: CapacityEngine.state(for: visit),
@@ -58,35 +58,34 @@ struct KenyangApp: App {
             // ending measures capacity. Recording `.unknown` keeps it an honest lower
             // bound instead of feeding the fit an observation nobody made.
             store.endVisit(visit, outcome: .stopped, ending: .unknown)
-            let ended = LiveActivityController.state(phase: .stopGuard,
-                                                     capacity: CapacityEngine.state(for: visit),
-                                                     minutesRemaining: visit.minutesRemaining,
-                                                     roundIndex: store.currentRound(in: visit),
-                                                     nextTarget: nil,
-                                                     message: "Meal ended.")
-            LiveActivityController.shared.end(ended)
-            // The Live Activity goes away by itself; the widget does not. Without this
-            // it keeps showing the ended meal's capacity as though it were live.
-            LiveActivityController.shared.publishSnapshot(visit: visit, state: ended)
+            LiveActivityController.shared.finish(visit: visit, roundIndex: store.currentRound(in: visit))
         case .rateGood, .rateSkip:
             // Unlike the Action Button this rates, because the Island names the dish
             // directly above the buttons — the diner can see what they are answering.
-            // Each tap is one plate of the target eaten; the rating is the dish's, set
-            // or replaced, so two plates of Karubi are one opinion about Karubi.
+            // Good is one plate of the target eaten; the rating is the dish's, set or
+            // replaced, so two plates of Karubi are one opinion about Karubi. Skip is
+            // the same rule as the rating row: an uneaten order is passed, not logged.
             guard let plan = store.lastPlan,
                   let next = store.nextUnloggedItem(in: plan, visit: visit) else { return }
             let round = store.currentRound(in: visit)
-            store.rate(dishName: next.item.dishName,
-                       category: next.item.category,
-                       rating: nil,
-                       portion: .normal,
-                       in: visit,
-                       roundIndex: round)
-            store.setRating(command == .rateGood ? .good : .skip,
-                            dishName: next.item.dishName,
-                            category: next.item.category,
-                            in: visit,
-                            roundIndex: round)
+            if command == .rateSkip {
+                store.skip(dishName: next.item.dishName,
+                           category: next.item.category,
+                           in: visit,
+                           roundIndex: round)
+            } else {
+                store.rate(dishName: next.item.dishName,
+                           category: next.item.category,
+                           rating: nil,
+                           portion: .normal,
+                           in: visit,
+                           roundIndex: round)
+                store.setRating(.good,
+                                dishName: next.item.dishName,
+                                category: next.item.category,
+                                in: visit,
+                                roundIndex: round)
+            }
             LiveActivityController.shared.refresh(visit: visit, store: store)
         }
     }

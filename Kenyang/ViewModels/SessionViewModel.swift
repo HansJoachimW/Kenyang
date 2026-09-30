@@ -317,11 +317,29 @@ final class SessionViewModel {
 
     func rate(_ item: PlannedItem, rating: Rating) {
         guard let visit else { return }
-        let replaced = store.setRating(rating,
+        let replaced: Bool
+        if rating == .skip {
+            // Skipping an order nobody ate is a pass, not a taste: nothing to record.
+            guard let rated = store.skip(dishName: item.dishName,
+                                         category: item.category,
+                                         in: visit,
+                                         roundIndex: roundIndex) else {
+                trace.record(kind: .toolCall,
+                             title: "passed",
+                             detail: "\(item.dishName) → skipped before eating, no plate logged",
+                             deterministic: true)
+                syncActivity()
+                return
+            }
+            replaced = rated
+        } else {
+            store.unpass(item.dishName, round: roundIndex)
+            replaced = store.setRating(rating,
                                        dishName: item.dishName,
                                        category: item.category,
                                        in: visit,
                                        roundIndex: roundIndex)
+        }
         // Once per dish per round, like the rating itself — a changed mind is not a
         // second outcome for the basis calibration to count.
         if !replaced, let hypothesis, item.category == hypothesis.category {
@@ -341,6 +359,7 @@ final class SessionViewModel {
     /// tap is a mis-tap, and there is no undo for a capacity reading.
     func logOrder(_ item: PlannedItem) {
         guard let visit, ordersEaten(item) < item.quantity else { return }
+        store.unpass(item.dishName, round: roundIndex)
         store.rate(dishName: item.dishName,
                    category: item.category,
                    rating: nil,
@@ -363,7 +382,10 @@ final class SessionViewModel {
 
     func rating(of item: PlannedItem) -> Rating? {
         guard let visit else { return nil }
-        return store.orders(of: item.dishName, in: visit, round: roundIndex).first(where: \.isRated)?.rating
+        if let rated = store.orders(of: item.dishName, in: visit, round: roundIndex).first(where: \.isRated) {
+            return rated.rating
+        }
+        return store.isPassed(item.dishName, round: roundIndex) ? .skip : nil
     }
 
     func rate(dishNamed name: String, rating: Rating, portion: PortionBucket = .normal) {
@@ -442,19 +464,8 @@ final class SessionViewModel {
     /// bound the fit must not average in as though it were an observation.
     func endMeal(reason: MealEnding) {
         guard let visit else { return }
-        let capacity = CapacityEngine.state(for: visit)
-        let ended = LiveActivityController.state(phase: .stopGuard,
-                                                 capacity: capacity,
-                                                 minutesRemaining: visit.minutesRemaining,
-                                                 roundIndex: roundIndex,
-                                                 nextTarget: nil,
-                                                 message: "Meal ended.")
-        LiveActivityController.shared.end(ended)
         store.endVisit(visit, outcome: .stopped, ending: reason)
-        // After `endVisit`, so the snapshot records `isActive: false`. The Live Activity
-        // dismisses itself and the widget does not — it would otherwise show the ended
-        // meal's remaining capacity until the next meal started.
-        LiveActivityController.shared.publishSnapshot(visit: visit, state: ended)
+        LiveActivityController.shared.finish(visit: visit, roundIndex: roundIndex)
         pathSignatures.append(trace.pathSignature)
         self.visit = nil
         self.plan = nil
@@ -465,7 +476,17 @@ final class SessionViewModel {
     /// Stop in the Live Activity ends the visit in the app's process without passing
     /// through here, so this screen kept showing a meal that was already over. Called
     /// whenever the app comes back to the foreground.
+    ///
+    /// The widget's Start is the same in the other direction: a meal begun while the
+    /// app sat on the start screen is adopted here, or the start screen would offer to
+    /// begin a second one.
     func reconcileWithStore() {
+        if visit == nil, let active = store.activeVisit() {
+            visit = active
+            roundIndex = store.currentRound(in: active)
+            phase = .eating
+            return
+        }
         guard let visit, visit.endedAt != nil else { return }
         pathSignatures.append(trace.pathSignature)
         self.visit = nil
@@ -473,6 +494,14 @@ final class SessionViewModel {
         self.hypothesis = nil
         self.servedItems = []
         phase = .idle
+    }
+
+    /// An activity with no meal behind it is left over from an ending this process did
+    /// not see, such as one before a relaunch. Separate from `reconcileWithStore`
+    /// because the battery reconciles scratch stores, and it must not end the real
+    /// meal's activity while doing so.
+    func endStaleActivity() {
+        if store.activeVisit() == nil { LiveActivityController.shared.end() }
     }
 
     /// What the meal cost so far, against the cover. Money is stated once, after the

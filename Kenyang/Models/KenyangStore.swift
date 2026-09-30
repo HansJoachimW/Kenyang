@@ -190,6 +190,7 @@ final class KenyangStore {
                           declaredMaxSatiety: maxSatiety)
         context.insert(visit)
         save()
+        passedOrders = []
         return visit
     }
 
@@ -261,10 +262,43 @@ final class KenyangStore {
     func nextUnloggedItem(in plan: RoundPlan, visit: Visit) -> (item: PlannedItem, index: Int)? {
         let round = currentRound(in: visit)
         for (index, item) in plan.items.enumerated()
-        where orders(of: item.dishName, in: visit, round: round).count < item.quantity {
+        where orders(of: item.dishName, in: visit, round: round).count < item.quantity
+            && !isPassed(item.dishName, round: round) {
             return (item, index)
         }
         return nil
+    }
+
+    /// Dishes skipped this round, as `"round|name"`. In memory, like `lastPlan`: a
+    /// pass writes no event, because an order not eaten costs no capacity and is not
+    /// a taste the value loop may learn from.
+    private var passedOrders: Set<String> = []
+
+    private func passKey(_ dishName: String, round: Int) -> String {
+        "\(round)|\(dishName.lowercased())"
+    }
+
+    func isPassed(_ dishName: String, round: Int) -> Bool {
+        passedOrders.contains(passKey(dishName, round: round))
+    }
+
+    /// Eating or rating it after all takes the pass back.
+    func unpass(_ dishName: String, round: Int) {
+        passedOrders.remove(passKey(dishName, round: round))
+    }
+
+    /// Skip means *not this one*. With nothing of it eaten, that is passing on the
+    /// order: no plate, no capacity and no rating, so it stays *0 of 1 eaten*. With a
+    /// plate eaten it is also a real rating of that plate. Either way the dish is done
+    /// for the round, and the next-dish rule moves past it.
+    ///
+    /// Returns what `setRating` returned when a plate was rated, `nil` when the order
+    /// was only passed.
+    @discardableResult
+    func skip(dishName: String, category: MenuCategory, in visit: Visit, roundIndex: Int) -> Bool? {
+        passedOrders.insert(passKey(dishName, round: roundIndex))
+        guard !orders(of: dishName, in: visit, round: roundIndex).isEmpty else { return nil }
+        return setRating(.skip, dishName: dishName, category: category, in: visit, roundIndex: roundIndex)
     }
 
     /// Every order of one dish logged in one round, rated or not.

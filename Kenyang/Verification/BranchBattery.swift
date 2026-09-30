@@ -291,7 +291,7 @@ enum BranchBattery {
     }
 
     private static func spread() -> [DishSighting] {
-        DemoSpread.standard.map {
+        FixtureSpread.standard.map {
             DishSighting(name: $0.name, category: $0.category,
                          printedCategory: $0.printed, tierRank: $0.tier)
         }

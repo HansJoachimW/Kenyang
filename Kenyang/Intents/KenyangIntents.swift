@@ -49,17 +49,6 @@ struct StartSessionIntent: AppIntent {
     static var description = IntentDescription("Begin a meal and start planning rounds.")
     static var openAppWhenRun = true
 
-    @Parameter(title: "Restaurant", default: "Demo Buffet")
-    var restaurantName: String
-
-    // AppIntents requires a compile-time literal here, so these two cannot read
-    // SessionDefaults. Keep them in step with it by hand.
-    @Parameter(title: "Price per head", default: 250_000)
-    var pricePerHead: Double
-
-    @Parameter(title: "Seating limit in minutes", default: 90)
-    var seatingLimit: Int
-
     @Dependency private var store: KenyangStore
 
     @MainActor
@@ -67,12 +56,13 @@ struct StartSessionIntent: AppIntent {
         if store.activeVisit() != nil {
             return .result(dialog: "A meal is already in progress.")
         }
-        let visit = store.startVisit(restaurantName: restaurantName,
-                                     pricePerHead: pricePerHead,
-                                     seatingLimitMinutes: seatingLimit,
+        let menu = BuffetMenu.default
+        let visit = store.startVisit(restaurantName: menu.venueName,
+                                     pricePerHead: menu.pricePerHead,
+                                     seatingLimitMinutes: menu.seatingMinutes,
                                      maxSatiety: SessionDefaults.maxSatiety)
-        store.addSightings(DemoSpread.standard, to: visit)
-        return .result(dialog: "Session started at \(restaurantName).")
+        store.addSightings(menu.items, to: visit)
+        return .result(dialog: "Session started at \(menu.venueName).")
     }
 }
 
@@ -271,6 +261,7 @@ struct EndMealIntent: AppIntent {
         }
         let eaten = visit.tasteEvents.count
         store.endVisit(visit, outcome: .stopped, ending: reason)
+        LiveActivityController.shared.finish(visit: visit, roundIndex: store.currentRound(in: visit))
         RoundSnippetIntent.reload()
         let tail = reason.measuresCapacity
             ? "That gives me a real reading on your capacity."

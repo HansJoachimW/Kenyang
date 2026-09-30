@@ -26,7 +26,7 @@ enum DiningFocus {
     /// focus filter's entire observable consequence** — it is what makes the filter a
     /// reconfiguration rather than a setting nothing reads, and it is what the Focus
     /// filter test asserts.
-    static func venueForNewSession(fallback: String = "Demo Buffet") -> String {
+    static func venueForNewSession(fallback: String = BuffetMenu.default.venueName) -> String {
         venueName ?? fallback
     }
 }

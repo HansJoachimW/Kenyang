@@ -1,6 +1,31 @@
 import Foundation
 import SwiftData
 
+/// The fifteen-dish, two-tier spread every harness was measured against.
+///
+/// Not the app's menu (`BuffetMenu.default` is). Kept fixed so the token, growth and
+/// branch figures on record stay comparable run to run; pointing the harnesses at a
+/// different menu would change their inputs without saying so.
+enum FixtureSpread {
+    static let standard: [BuffetMenu.Item] = [
+        ("Wagyu Karubi", .meat, "PREMIUM MEAT", 1),
+        ("Prime Rib Eye", .meat, "PREMIUM MEAT", 1),
+        ("Gyu-Kaku Karubi", .meat, "STANDARD MEAT", 0),
+        ("Beef Harami", .meat, "STANDARD MEAT", 0),
+        ("Pork Belly Shio", .meat, "STANDARD MEAT", 0),
+        ("Salmon Nigiri", .raw, "SUSHI", 0),
+        ("Tuna Nigiri", .raw, "SUSHI", 0),
+        ("Chicken Karaage", .fried, "APPETIZER & AGEMONO", 0),
+        ("Ebi Fry", .fried, "APPETIZER & AGEMONO", 0),
+        ("Garlic Rice", .starch, "RICE & NOODLE", 0),
+        ("Yaki Udon", .starch, "RICE & NOODLE", 0),
+        ("Miso Soup", .soup, "SOUP", 0),
+        ("Kaisou Salad", .vegetable, "SALAD", 0),
+        ("Grilled Corn", .vegetable, "GRILL APPETIZER", 0),
+        ("Matcha Ice Cream", .dessert, "DESSERT", 0)
+    ]
+}
+
 /// Inputs for the context audit (TESTS.md T50/T51/T52).
 ///
 /// The mid-meal state mirrors what `RoundAgent` actually builds at round 2 —
@@ -13,7 +38,7 @@ enum Fixtures {
     // MARK: - Mid-meal agent state
 
     static func midMealInput() -> AgentInput {
-        let sightings = DemoSpread.standard.map {
+        let sightings = FixtureSpread.standard.map {
             DishSighting(name: $0.name,
                          category: $0.category,
                          printedCategory: $0.printed,

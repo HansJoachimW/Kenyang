@@ -1,11 +1,13 @@
+import AppIntents
 import SwiftUI
 import WidgetKit
 
 /// The home-screen and lock-screen widget family, off the same capacity ring.
 ///
-/// Read-only by design: every control in this app runs the stop check, and a widget
-/// tap that logs food without one would route around the guardrail that exists because
-/// the model would not choose to stop. Tapping opens the app.
+/// The home-screen sizes start and end a meal, without opening the app. They never log
+/// food: every log in this app runs the stop check, and a widget tap that logged food
+/// without one would route around the guardrail that exists because the model would not
+/// choose to stop. Tapping anywhere else opens the app.
 struct CapacityWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "KenyangCapacity", provider: SnapshotProvider()) { entry in
@@ -73,17 +75,38 @@ struct CapacityWidgetView: View {
                     if let target = snapshot.nextTarget {
                         Text("Next: \(target)").font(.caption).lineLimit(1)
                     }
+                    Spacer(minLength: 0)
+                    mealButton
                 }
                 Spacer(minLength: 0)
             }
 
         default:
             VStack(spacing: 8) {
-                ring(size: 60)
+                ring(size: 48)
                 Text(detail).font(.caption).foregroundStyle(Palette.muted)
                     .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                mealButton
             }
         }
+    }
+
+    /// Start when no meal is running, End while one is. End records the ending as
+    /// unknown, the same as the Live Activity's Stop: one tap cannot say why the meal
+    /// ended, and only a `fullness` ending may count as a capacity reading.
+    @ViewBuilder
+    private var mealButton: some View {
+        Group {
+            if snapshot.isActive {
+                Button(intent: StopFromActivityIntent()) { Text("End meal") }
+            } else {
+                Button(intent: StartMealFromWidgetIntent()) { Text("Start meal") }
+            }
+        }
+        .buttonStyle(.bordered)
+        .tint(Palette.accent)
+        .font(.caption.weight(.medium))
     }
 
     private func ring(size: CGFloat) -> some View {

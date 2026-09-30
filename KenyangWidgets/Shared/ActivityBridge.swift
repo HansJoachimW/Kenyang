@@ -68,19 +68,18 @@ struct StopFromActivityIntent: LiveActivityIntent {
     }
 }
 
-/// What the Control Center control runs. **Not** `StartSessionIntent`, which opens the
-/// app — *"an intent that only opens the app is a launcher"*, and a control that launches
-/// an app is a shortcut with extra steps.
+/// What the home-screen widget's Start runs, from the default menu. **Not**
+/// `StartSessionIntent`, which opens the app: *"an intent that only opens the app is a
+/// launcher"*. The widget's End is `StopFromActivityIntent`, the Live Activity's Stop.
 ///
 /// It is a `LiveActivityIntent` for the same reason the three above are: `perform()` has
 /// to reach `KenyangStore`, which lives in the app's process and not the extension's.
-/// That conformance is also literally true here — starting a session is what starts the
-/// Live Activity, which is the whole point of the control (`BUFFET.md` §10: *Control
-/// Center: start session → Live Activity begins*).
+/// That conformance is also literally true here: starting a session is what starts the
+/// Live Activity.
 ///
 /// Discoverable, unlike the three above, because *"start a meal"* is a complete
 /// instruction on its own and belongs in Shortcuts.
-struct StartSessionControlIntent: LiveActivityIntent {
+struct StartMealFromWidgetIntent: LiveActivityIntent {
     static var title: LocalizedStringResource = "Start a meal"
     static var description = IntentDescription("Begin a meal and start the Live Activity, without opening the app.")
 
@@ -88,5 +87,18 @@ struct StartSessionControlIntent: LiveActivityIntent {
     func perform() async throws -> some IntentResult {
         ActivityBridge.shared.send(.startSession)
         return .result()
+    }
+}
+
+/// What the Control Center control runs: it opens the app and does nothing else.
+/// Starting and ending a meal belong to the home-screen widget.
+struct OpenKenyangIntent: AppIntent {
+    static var title: LocalizedStringResource = "Open Kenyang"
+    static var openAppWhenRun = true
+    // Backs the control. Shortcuts can already open an app.
+    static var isDiscoverable = false
+
+    func perform() async throws -> some IntentResult {
+        .result()
     }
 }
