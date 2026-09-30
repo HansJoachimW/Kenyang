@@ -75,15 +75,19 @@ It argues **down** the ladder, never up — recommending too high creates a sunk
 ```
 BEFORE YOU GO   arrival at a known venue, or a booking on today's calendar
                 → the tier argument runs unbidden, and usually stays silent
-START           "Still avoiding these?" — the avoid list, confirmed per meal
-ROUND           the agent HYPOTHESISES where the value is and commits to an
-                expected rating · SETS THE OBJECTIVE for the round · Swift PLANS
-                the orders under it: 1 order to learn an untried dish, up to 3
-                of a dish your ratings back
-                → Accept · Adjust (tell it which way) · Stop
-EAT             log plates (+ / −, Action Button, Siri, the Island) and rate
-                each dish once per round — rating again replaces it
-DECIDE          next round: the tools say whether the claim held → exploit or pivot
+START           the app, the home-screen widget or Siri, always from the default
+                menu (Gyu-Kaku Standard, 53 dishes, Rp 248,800, 90 min) and the
+                diner's own plates-per-meal answer · "Still avoiding these?" in the app
+ROUND           the agent GUESSES where the value is and commits to an expected
+                rating · SETS THE GOAL for the round · Swift PLANS the orders under
+                it: 1 order to learn an untried dish, up to 3 of a dish your ratings back
+                → Accept · Adjust (tell it which way) · Stop, in the app or on the
+                  Live Activity (Order these · Another)
+EAT             log plates (+ / −, Action Button, Siri, the Island) and rate each
+                dish once per round — rating again replaces it. Skip on a dish nobody
+                ate passes on it: no plate, no room spent, no rating
+DECIDE          next round, from the app or the Live Activity: the tools say whether
+                the guess held → stay or change course
 STOP            capacity or seating time gone → the app says stop, then asks why
 ```
 
@@ -92,11 +96,11 @@ STOP            capacity or seating time gone → the app says stop, then asks w
 | Moment | Surface |
 |---|---|
 | Morning of, or arrival | **Proactive notification** — or, more often, silence |
-| Sitting down | **Control Center** control or the app |
-| Each round | **The app** (the plan), or the **Siri snippet**: Accept · Adjust · Stop |
+| Sitting down | **Home-screen widget** (Start) or the app; the **Control Center** control opens the app |
+| Each round | **The app**, the **Live Activity** (Next round · Order these · Another · ingredient questions), or the **Siri snippet** |
 | Eating | **Dynamic Island** / **Lock Screen** Live Activity · **Action Button** · **Siri** |
 | At a glance | **Home-screen widget** · Spotlight for any dish |
-| The stop | **The app** — and the one question worth asking: why did the meal end? |
+| The stop | **The app** — and the one question worth asking: why did the meal end? The widget and the Live Activity can end a meal in one tap, recorded as *unknown* |
 
 ---
 
@@ -125,35 +129,27 @@ STOP            capacity or seating time gone → the app says stop, then asks w
 
 ```
 Kenyang/
-├── Kenyang/                         the app target
-│   ├── App/KenyangApp.swift         @main, container, AppDependencyManager, the Island's command handler, launch arguments
-│   ├── Models/                      no behaviour beyond derivation
-│   │   ├── Domain.swift             closed-set enums, FlavourProfile, CapacityState, MealEnding
-│   │   ├── KenyangStore.swift       the single data access point — orders, ratings, the shared plan
-│   │   ├── Persistence.swift        @Model entities + KenyangSchema
-│   │   └── SessionDefaults.swift    seed values for a meal, in one place
-│   ├── Engine/                      deterministic Swift — the model never computes
-│   │   ├── CapacityEngine.swift     satiety accounting, the capacity fit
-│   │   ├── RoundPlanner.swift       bounded beam search over orders, and the reason under each dish
-│   │   ├── TierEngine.swift         which tier to buy, argued from history — or refused
-│   │   └── ValueEngine.swift        posteriors, the verdict rule, satiety discount, break-even
-│   ├── Agent/
-│   │   ├── AgentCapabilities.swift  the one place iOS 27 is branched on
-│   │   ├── AgentProgress.swift      what the wait screen reads
-│   │   ├── AgentTypes.swift         @Generable contracts, TraceLog
-│   │   └── RoundAgent.swift         the state machine, Adjust, retries, error classification
-│   ├── Activity/LiveActivityController.swift   start/update/end, and the pure state derivation
-│   ├── Tools/AgentTools.swift       8 Tool conformances + the ToolContext actor
-│   ├── Guardrails/Guardrails.swift  every layer, each independently testable
-│   ├── ViewModels/SessionViewModel.swift       @Observable, owns phase and session state
-│   ├── Capture/                     menu ingest — built, entry point hidden (see status)
-│   ├── Proactive/                   the arrival and morning-of trigger, and its silences
-│   ├── Views/                       one file per screen in the design record
-│   ├── Intents/                     App Intents, entities, Spotlight, the snippet, the Action Button
-│   └── Verification/                measurement harnesses — the battery and the model probes
-└── KenyangWidgets/                  the extension
-    ├── CapacityWidget.swift · RoundLiveActivity.swift · StartSessionControl.swift
-    └── Shared/                      in BOTH targets: ActivityBridge, CapacityRing, DesignTokens, MealSnapshot, RoundActivityAttributes
+├── Kenyang/                          the app target
+│   ├── App/                          @main, dependency setup, MealCommandHandler for widget and Live Activity buttons
+│   ├── Models/
+│   │   ├── Domain.swift              closed-set enums, each carrying its own display label
+│   │   ├── Persistence.swift         @Model entities; stored properties are never renamed
+│   │   ├── KenyangStore.swift        reads and writes SwiftData, nothing else
+│   │   ├── MealSession.swift         the meal in progress: round, plan, plates, ratings, skips, answers
+│   │   ├── BuffetMenu.swift          the default menu every meal starts from
+│   │   └── DinerPreferences.swift    the diner's plates-per-meal answer
+│   ├── Engine/                       pure Swift: capacity, value, the planner, tiers, the avoid-list verdict
+│   ├── Agent/                        RoundAgent, RoundCoordinator (the one place rounds are planned), @Generable types, the trace
+│   ├── Tools/AgentTools.swift        8 Tool conformances + the ToolContext actor
+│   ├── Guardrails/                   ClaimGuards · DecisionGuards · MealGuards · LoopBudget · ModelAvailability
+│   ├── Activity/                     LiveActivityController, the MealDisplay for the Live Activity and widget
+│   ├── ViewModels/MealViewModel.swift  which screen is showing
+│   ├── Views/                        one file per screen, plus shared Components
+│   ├── Intents/                      App Intents, entities, snippet, Action Button, shortcuts, Focus filter
+│   └── Proactive/                    the arrival and morning-of trigger, and its silences
+├── KenyangWidgets/                   the extension: Live Activity, widget, Control Center control
+│   └── Shared/                       in BOTH targets: ActivityBridge, CapacityRing, DesignTokens, MealSnapshot, RoundActivityAttributes
+└── KenyangTests/                     Swift Testing unit tests for the rules
 ```
 
 ---
@@ -163,6 +159,10 @@ Kenyang/
 ### Store events, derive state
 
 `TasteEvent` — **one plate eaten**, rated or not — is the source of truth. Capacity remaining, value, round number and break-even are **computed** from the event log, never persisted. The satiety model is still unvalidated; because values are derived, changing the model is a re-render, not a data migration.
+
+### One meal, many surfaces
+
+The app, the Live Activity, the widget, Siri and the Action Button all act on the meal through **one `MealSession`**, and every round is planned through **one `RoundCoordinator`**, so a rule (skip, the order cap, one rating per round, the round number) exists once. `KenyangStore` only persists. The session mirrors itself onto the Live Activity and the widget through the `MealDisplay` protocol, which the tests replace with a stand-in. `MealViewModel` only decides which screen shows.
 
 ### The model chooses the objective; Swift computes the optimum
 
@@ -243,7 +243,7 @@ Eight `Tool` conformances passed to `LanguageModelSession(tools:)`. `ToolContext
 | 4 Grounding | `GroundingGuard`, `OutputValidator` | A claim about a category not on tonight's menu is discarded; so is one too thin to read, or one with volume framing |
 | 5 Statistical | `StatisticalGuard` | No claim below minimum *n* |
 | 6 Action | `ExclusionValidator`, `StopGuard`, `TriageGuard`, `ConsistencyGuard`, `AdjustGuard` | Ternary exclusion; forced stop; forced decline; the move overridden when it contradicts its own reason; the adjusted objective checked against the asked direction |
-| 7 Loop | `LoopBudget`, `AskBudget` | Max rounds, max calls per round, a 45 s wall clock, three questions per meal. Every refusal names its reason in the trace |
+| 7 Loop | `LoopBudget` | Max rounds, max calls per round, a 45 s wall clock. Every refusal names its reason in the trace |
 | 8 Safety | `RoundAgent.retrying(_:)` | One retry on transient generation failures; failures surface as `modelFailure`, never as a decision |
 
 **Several exist because measurement demanded them.** The model chose `stop` 0/3 and `decline` 0/2 times even when handed exhausted capacity — so stopping and declining are computed and forced. A prompt-injection test made the model argue for volume — so the claim is checked before display. The model writes *"the tools say the hypothesis is contradicted"* and then chooses `exploit` — so the move is overridden. **A guardrail overriding on a threshold is legitimate; Swift choosing the next action on a judgement would not be.**
@@ -270,21 +270,11 @@ Eight `Tool` conformances passed to `LanguageModelSession(tools:)`. `ToolContext
 
 ## Running it
 
-Open `Kenyang.xcodeproj` and run the **Kenyang** scheme. **To run on the phone, pick it by its device name under *iOS Device*** — the Simulator is also called "iPhone 17". Apple Intelligence must be available for the agent; without it the app plans from priors and says so.
+Open `Kenyang.xcodeproj` and run the **Kenyang** scheme. **To run on the phone, pick it by its device name under *iOS Device*** — the Simulator is also called "iPhone 17". Apple Intelligence must be available for the agent; without it the app plans without the AI and says so.
 
-**In-app:** the **Verify** toolbar button runs the battery and every harness, and prints to the Xcode console. On a phone this is the only way.
+**Tests:** `Cmd-U` runs `KenyangTests` (Swift Testing, 25 tests): the skip rule, the order cap, removing a plate, one rating per round, ingredient answers, the stop guard, the avoid-list verdict, the tier refusal, the Action Button, the Live Activity phases, and a guard that planning the full menu stays under a second.
 
-**Headless, Simulator only:**
-
-```bash
-xcrun simctl launch --console-pty <device> com.hansjoachim.Kenyang --run-all
-```
-
-App battery → context audit → stance probe → growth audit → schema/position/retry probes → branch battery. Individually: `--verify` `--token-audit` `--stance-probe` `--growth-audit` `--schema-probe` `--position-probe` `--retry-probe` `--branch-battery`.
-
-**The first launch after a reinstall sometimes stalls before printing anything.** Relaunch.
-
-**These are measurement, not tests** — there is no test target. The Verify menu also seeds fixtures: two or six visits of tier history (screen 2's refusal and its argument) and a guard override for the trace.
+**The first launch after a reinstall sometimes stalls before anything appears.** Relaunch.
 
 ---
 
@@ -294,7 +284,7 @@ Every figure is from a logged run.
 
 | | |
 |---|---|
-| App battery, Simulator, 2026-09-29 | **30 checks, 30 passed.** One check that needs a live model call reports **SKIPPED** instead of failing when a decode flakes |
+| Unit tests, Simulator, 2026-09-30 | **25 of 25 pass.** They replaced the in-app battery (30/30 on 2026-09-29) |
 | Tool calling | **8/8 tools invoked** by the model, unprompted |
 | Falsification tools returning a negative | **3/3** |
 | A hypothesis dying, then pivoting | ✅ |
@@ -308,6 +298,8 @@ Every figure is from a logged run.
 
 **The Simulator is not the device.** It ran ~3× slower in early September and faster later; latency comes from the phone only. The iOS 27 Simulator has **no Apple Intelligence assets**, so every model-dependent check there is declared and unexercised.
 
+The model figures above came from measurement harnesses that were removed on 2026-09-30 to keep the app readable; they are recoverable from git history. **They were measured on a 15-dish menu.** The default menu is now 53 dishes, which roughly triples what the menu tool returns, and has not been re-measured.
+
 **Context is not the constraint.** Tool definitions are the largest line item; tool results cost 11–28 tokens each. Output is bounded per call site by `GenerationOptions(maximumResponseTokens:)` — **not** by a `.pattern` guide, which compiles and is rejected by the device at runtime, killing every call.
 
 ---
@@ -316,27 +308,26 @@ Every figure is from a logged run.
 
 ### Working
 
-A meal end to end: the avoid-list check, the agent's hypothesis with a pre-registered expectation, the round objective, beam-search planning in **orders**, Adjust through the agent, plate logging with **+ / −**, one rating per dish per round, capacity accounting that learns from the diner's fullness report, the stop and its question. The trace with computed-versus-model attribution. Eight App Intents, four `IndexedEntity` types indexed into Spotlight, an interactive snippet, an Action Button intent, a Live Activity and all three Island presentations, a home-screen widget, a Control Center control, a Dining focus filter, and an arrival trigger that usually says nothing.
+A meal end to end: start from the app, the widget or Siri on the default menu; the avoid-list check; the agent's guess with a pre-registered expectation; the round goal; beam-search planning in **orders**; Adjust through the agent; plate logging with **+ / −**; one rating per dish per round, and skip as a pass on an uneaten dish; capacity accounting that learns from the diner's fullness report; the stop and its question. A home screen with the diner's usual plates, the avoid list, past meals and the tier question; the launch ring. The trace in plain words with the technical record underneath. Eight App Intents, four `IndexedEntity` types in Spotlight, an interactive snippet, an Action Button intent, a Live Activity that can carry the meal round after round without opening the app, all three Island presentations, a home-screen widget that starts and ends a meal, a Control Center control, a Dining focus filter, and an arrival trigger that usually says nothing.
 
 ### Seen on hardware — 2026-09-29
 
-The **Live Activity on the phone**: it starts, updates, and **its Stop ends the meal** — which is how the *app kept showing a finished meal* bug was found. The ring and the timer on the eating screen.
+The **Live Activity on the phone**: it starts, updates, and **its Stop ends the meal**. The ring and the timer on the eating screen. *(Before the 2026-09-30 rewrite.)*
 
 ### Built, not yet exercised on a phone
 
-**Siri by voice with the app closed · Spotlight returning a dish · the snippet redrawing in place · the Island's Good / Skip · the Action Button and its haptic · the widget on a real home screen · the Control Center tile · the Dining focus row · a real arrival or calendar trigger.** Several were checked in the Simulator (the Island, the widget); none of these substitutes for the phone.
+**The Live Activity round loop and its ingredient questions · the widget's Start and End · Siri by voice with the app closed · Spotlight returning a dish · the snippet redrawing in place · the Island's Good / Skip · the Action Button and its haptic · the Control Center tile · the Dining focus row · a real arrival or calendar trigger.** The home screen, the plan, the eating screen and the widget were checked in the Simulator.
 
 ### Open defects
 
-The ones that change behaviour:
+1. **The agent's first round is slow on the 53-dish menu.** In the Simulator the guessing step ran past two minutes without finishing; planning without the AI is instant. Needs a timing on the phone.
+2. **The Lock Screen bar can render light-on-light** on the bright Lock Screen. Check on the phone before the next attempt.
+3. **The round's plan is in memory** — relaunching mid-meal loses the rating rows until the next round is planned.
+4. **Meals started from the widget or Siri skip the avoid-list confirmation.** Dishes the list can't settle are still asked about before the round can be ordered.
+5. **Swift 6 `Sendable` warnings** where SwiftData models cross into the tool actor.
+6. After a reinstall the widget can show the last meal's snapshot until a new meal starts.
 
-1. **The Lock Screen bar can render light-on-light** on the bright Lock Screen. The fix committed on 2026-09-28 does not work — iOS draws its own background there. Check on the phone before the next attempt.
-2. **Two notions of "the current round".** The store derives it from what has been logged; the app counts it. Right after *Plan the next round*, an Island or Action Button log lands in the previous round.
-3. **"Rate what you ate" is in memory only** — relaunching mid-meal empties it.
-4. **`KenyangStore` is not observable.** Worked around where it showed (the start screen, the foreground after an outside Stop); any new screen reading the store directly inherits it.
-5. **Meals started from Control Center or Siri skip the avoid-list check.**
-
-**Deliberately not built:** grill constraints (slots, cook time, plain before marinated) · a thermal budget · OCR · the per-category satiety density (built, silenced pending a real-meal measurement) · a model-phrased tier notification (template, pending a background-model measurement). Menu capture is built and its entry point is hidden.
+**Deliberately not built:** grill constraints (slots, cook time, plain before marinated) · a thermal budget · OCR menu capture (removed 2026-09-30) · per-category satiety density · a model-phrased tier notification (template, pending a background-model measurement).
 
 ---
 
