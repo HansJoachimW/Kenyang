@@ -242,7 +242,7 @@ Eight `Tool` conformances passed to `LanguageModelSession(tools:)`. `ToolContext
 | 3 Structural | `@Generable` enums | The model cannot invent a category or a basis |
 | 4 Grounding | `GroundingGuard`, `OutputValidator` | A claim about a category not on tonight's menu is discarded; so is one too thin to read, or one with volume framing |
 | 5 Statistical | `StatisticalGuard` | No claim below minimum *n* |
-| 6 Action | `ExclusionValidator`, `StopGuard`, `TriageGuard`, `ConsistencyGuard`, `AdjustGuard` | Ternary exclusion; forced stop; forced decline; the move overridden when it contradicts its own reason; the adjusted objective checked against the asked direction |
+| 6 Action | `ExclusionValidator`, `StopGuard`, `TriageGuard`, `VerdictGuard`, `ReasonGuard`, `AdjustGuard` | Ternary exclusion; forced stop; forced decline; the move set by the tool's verdict (only a disproved guess changes course); a reason that misstates the verdict never shown as the AI's; the adjusted objective checked against the asked direction |
 | 7 Loop | `LoopBudget` | Max rounds, max calls per round, a 45 s wall clock. Every refusal names its reason in the trace |
 | 8 Safety | `RoundAgent.retrying(_:)` | One retry on transient generation failures; failures surface as `modelFailure`, never as a decision |
 
@@ -342,7 +342,7 @@ The **Live Activity on the phone**: it starts, updates, and **its Stop ends the 
 **Branch selection does not read the evidence.** On the two clean runs the model chose `exploit` every time it decoded, 18 for 18 — often right after writing *"the tools say the hypothesis is contradicted"*. So the claim splits, and both halves are measured:
 
 * **Hypothesis composition and the round objective are the model's** — it composes the claim over typed primitives and sets the policy the planner optimises.
-* **Branch selection is not agentic.** `ConsistencyGuard`, the verdict guard and `StopGuard` produce the right behaviour; the model does not. **The guard layer is the chooser, not a safety net over one** — the honest version, and still a legitimate architecture.
+* **Branch selection is not agentic.** `VerdictGuard` and `StopGuard` produce the right behaviour; the model does not. Since 2026-10-01 the verdict decides the move outright, and `ReasonGuard` keeps a misstated reason off the screen (the model copied the move's own description in 2 of 5 probe rounds). **The guard layer is the chooser, not a safety net over one** — the honest version, and still a legitimate architecture.
 
 The self-calibration mechanism (`getBasisCalibration`) is built and silenced by its own minimum *n*: **L3 shipped, with an L4 mechanism implemented and refusing to claim on this little data.** Do not round it up — the follow-up question is one sentence long: *how many meals is that?*
 

@@ -40,4 +40,39 @@ struct LoopBudget {
     var spentDescription: String {
         "round \(roundsUsed)/\(maxRounds), call \(callsThisRound)/\(callsPerRound)"
     }
+
+    var secondsLeft: TimeInterval {
+        max(0, secondsPerRound - Date.now.timeIntervalSince(roundStartedAt))
+    }
+}
+
+struct DeadlinePassed: Error, CustomStringConvertible {
+    var description: String { "The AI took longer than the round allows" }
+}
+
+/// The call's answer, or `DeadlinePassed` once the deadline goes by, without waiting for
+/// the call to notice it was cancelled: the round limit alone only refuses the next call,
+/// and one call hung for over three minutes in the Simulator.
+@MainActor
+func withDeadline<T: Sendable>(seconds: TimeInterval,
+                               _ call: @escaping @MainActor () async throws -> T) async throws -> T {
+    try await withCheckedThrowingContinuation { continuation in
+        var isSettled = false
+        var work: Task<Void, Never>?
+        var timer: Task<Void, Never>?
+        let settle = { (result: Result<T, Error>) in
+            guard !isSettled else { return }
+            isSettled = true
+            work?.cancel()
+            timer?.cancel()
+            continuation.resume(with: result)
+        }
+        work = Task { @MainActor in
+            do { settle(.success(try await call())) } catch { settle(.failure(error)) }
+        }
+        timer = Task { @MainActor in
+            guard (try? await Task.sleep(for: .seconds(seconds))) != nil else { return }
+            settle(.failure(DeadlinePassed()))
+        }
+    }
 }

@@ -103,9 +103,10 @@ struct TraceEntry: Identifiable, Sendable {
         case "context overflow":              "The AI ran out of room"
         case "hypothesise failed", "setIntent failed", "decide failed":
                                               "The AI's answer couldn't be read"
-        case "Consistency guard overrode the model", "Verdict guard overrode the model":
+        case "Verdict guard overrode the model":
                                               "Kenyang overruled the AI"
         case "pivot guard":                   "Kenyang changed course"
+        case "reason guard":                  "The AI misread the test"
         case "expectation guard":             "Kenyang changed the expected rating"
         case "adjust guard":                  "Kenyang moved the plan your way"
         case "untestable category":           "A guess that couldn't be tested"
@@ -134,6 +135,7 @@ struct TraceEntry: Identifiable, Sendable {
         let name = title.lowercased()
         if name.contains("adjust") { return "The AI didn't change the plan the way you asked, so Kenyang did." }
         if name.contains("pivot") { return "Your ratings didn't back the guess, so this round tries somewhere else." }
+        if name.contains("reason") { return "The AI misread whether its guess held, so Kenyang explains it from your ratings." }
         if name.contains("expectation") { return "The AI said the best food is here but expected you to skip it, so Kenyang expects fine instead." }
         return "The AI's reasoning didn't match what it chose, so Kenyang followed your ratings."
     }

@@ -1,15 +1,20 @@
 import Foundation
 
-/// Rejects a move that contradicts the reason the AI gave for it.
-enum ConsistencyGuard {
-    static func agrees(reason: String, move: RoundMove) -> Bool {
+/// Catches a reason that misstates the tool's verdict, so it is never shown as the AI's
+/// explanation. The words come from answers the model gave; the model often copies the
+/// move's own description ("the value is at a different category") whatever the tool said.
+enum ReasonGuard {
+    static func misstates(_ reason: String, verdict: HypothesisVerdict) -> Bool {
+        claimedVerdict(in: reason).map { $0 != verdict } ?? false
+    }
+
+    private static func claimedVerdict(in reason: String) -> HypothesisVerdict? {
         let lower = reason.lowercased()
-        let saysDisproved = ["contradict", "not supported", "elsewhere", "disprove"].contains { lower.contains($0) }
-        let saysHolds = ["support", "confirm", "holds"].contains { lower.contains($0) }
-        switch move {
-        case .pivot:   return !saysHolds || saysDisproved
-        case .exploit: return !saysDisproved
-        }
+        let says = { (words: [String]) in words.contains { lower.contains($0) } }
+        if says(["contradict", "not supported", "different category", "elsewhere", "disprove"]) { return .contradicted }
+        if says(["support", "confirm", "holds"]) { return .supported }
+        if says(["insufficient", "not enough"]) { return .insufficient }
+        return nil
     }
 }
 

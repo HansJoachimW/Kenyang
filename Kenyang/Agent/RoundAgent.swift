@@ -240,7 +240,7 @@ final class RoundAgent {
             await recordCalledTools()
 
             let move = guardedMove(decision, verdict: verdict)
-            trace.record(.decision, move.rawValue, decision.because, calculated: false)
+            recordReason(of: decision, move: move, verdict: verdict)
             return move == .pivot ? await pivot(from: hypothesis, input: input) : hypothesis
         } catch {
             trace.record(.modelFailure, "decide failed", "\(Self.describe(error)). The model could not explain the move; the tool verdict decides it instead.")
@@ -250,26 +250,30 @@ final class RoundAgent {
         }
     }
 
+    /// The tool's verdict decides the move; the AI's choice stands only when it agrees.
     private func guardedMove(_ decision: RoundDecision, verdict: HypothesisVerdict) -> RoundMove {
-        var move = decision.move
         let required = VerdictGuard.move(for: verdict)
-        if !ConsistencyGuard.agrees(reason: decision.because, move: move) {
-            trace.record(.guardrail, "Consistency guard overrode the model",
-                         "Reason said \"\(decision.because)\" but move was \(move.rawValue) — overridden",
-                         override: GuardOverride(wrote: decision.because, chose: move, forced: required,
-                                                 guardName: "ConsistencyGuard",
-                                                 did: "The AI's reason and its choice disagreed, so Kenyang went with the reason."))
-            move = required
+        guard decision.move != required else { return required }
+        trace.record(.guardrail, "Verdict guard overrode the model",
+                     "Tool said \(verdict.rawValue); \(decision.move.rawValue) rejected",
+                     override: GuardOverride(wrote: decision.because, chose: decision.move, forced: required,
+                                             guardName: "VerdictGuard",
+                                             did: VerdictGuard.explanation(for: verdict)))
+        return required
+    }
+
+    /// The reason is the AI's only when the AI made the move and its words say what the
+    /// tool said. Otherwise the row is Kenyang's; an override row already quotes the AI.
+    private func recordReason(of decision: RoundDecision, move: RoundMove, verdict: HypothesisVerdict) {
+        if decision.move != move {
+            trace.record(.decision, move.rawValue, VerdictGuard.explanation(for: verdict))
+        } else if ReasonGuard.misstates(decision.because, verdict: verdict) {
+            trace.record(.guardrail, "reason guard",
+                         "The AI wrote \"\(decision.because)\" but evaluateHypothesis said \(verdict.rawValue) — not shown as its reason")
+            trace.record(.decision, move.rawValue, VerdictGuard.explanation(for: verdict))
+        } else {
+            trace.record(.decision, move.rawValue, decision.because, calculated: false)
         }
-        if move != required {
-            trace.record(.guardrail, "Verdict guard overrode the model",
-                         "Tool said \(verdict.rawValue); \(move.rawValue) rejected",
-                         override: GuardOverride(wrote: decision.because, chose: move, forced: required,
-                                                 guardName: "VerdictGuard",
-                                                 did: VerdictGuard.explanation(for: verdict)))
-            move = required
-        }
-        return move
     }
 
     private func pivot(from hypothesis: ValueHypothesis, input: AgentInput) async -> ValueHypothesis {
@@ -357,28 +361,32 @@ final class RoundAgent {
         return false
     }
 
-    private func retrying<T>(_ label: String,
-                             narrowed: (() async throws -> T)? = nil,
-                             _ body: () async throws -> T) async throws -> T {
+    private func retrying<T: Sendable>(_ label: String,
+                                       narrowed: (@MainActor () async throws -> T)? = nil,
+                                       _ body: @escaping @MainActor () async throws -> T) async throws -> T {
         do {
-            return try await body()
+            return try await withinRound(body)
         } catch {
             switch Self.classify(error) {
             case .transient:
                 guard canCall("\(label) retry") else { throw error }
                 trace.record(.modelFailure, "retry", "\(label): \(Self.describe(error)) — retrying once")
-                return try await body()
+                return try await withinRound(body)
             case .overflow:
                 guard let narrowed, canCall("\(label) narrowed retry") else {
                     trace.record(.modelFailure, "context overflow", "\(label): the window filled during generation and there is no narrower request to fall back to.")
                     throw error
                 }
                 trace.record(.modelFailure, "context overflow", "\(label): the window filled during generation — retrying once on a fresh session with a narrowed request.")
-                return try await narrowed()
+                return try await withinRound(narrowed)
             case .fatal:
                 throw error
             }
         }
+    }
+
+    private func withinRound<T: Sendable>(_ call: @escaping @MainActor () async throws -> T) async throws -> T {
+        try await withDeadline(seconds: budget.secondsLeft, call)
     }
 
     private static func classify(_ error: Error) -> Failure {

@@ -70,7 +70,19 @@ private struct OverrideRow: View {
     let override: GuardOverride
     @Binding var isExpanded: Bool
 
+    /// The `VStack` keeps the group inside one row: a `DisclosureGroup` that is a row's
+    /// outermost view becomes a list outline, expanding into its own indented rows.
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            disclosure
+        }
+        .padding(12)
+        .background(Palette.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .listRowBackground(Palette.surface)
+        .listRowSeparator(.hidden)
+    }
+
+    private var disclosure: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
             VStack(alignment: .leading, spacing: 12) {
                 part("What the AI said") {
@@ -99,9 +111,6 @@ private struct OverrideRow: View {
         } label: {
             Text(entry.heading).font(.subheadline.weight(.semibold)).foregroundStyle(Palette.accent)
         }
-        .padding(12)
-        .background(Palette.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        .listRowBackground(Palette.surface)
     }
 
     private func part<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {

@@ -101,6 +101,54 @@ struct RuleTests {
         #expect(disproved == .pivot)
     }
 
+    /// Reasons the on-device model gave on 2026-09-30 and 2026-10-01, each with the verdict
+    /// `evaluateHypothesis` had actually returned, labelled by hand.
+    @Test func aReasonThatMisstatesTheToolIsCaught() {
+        let misstated: [(reason: String, verdict: HypothesisVerdict)] = [
+            ("The hypothesis is supported by the value estimate for raw, but the remaining capacity is uncertain due to an insufficient fullness reading.", .insufficient),
+            ("The tools say the hypothesis is CONTRADICTED. The value is at a different category.", .supported),
+            ("The value is at a different category.", .supported)
+        ]
+
+        let caught = misstated.filter { ReasonGuard.misstates($0.reason, verdict: $0.verdict) }
+
+        #expect(caught.count == misstated.count)
+    }
+
+    @Test func aReasonThatMatchesTheToolIsShown() {
+        let accurate: [(reason: String, verdict: HypothesisVerdict)] = [
+            ("The tools say the hypothesis is insufficient.", .insufficient),
+            ("The hypothesis is insufficient due to insufficient data for the raw category.", .insufficient),
+            ("The hypothesis was contradicted by the tools. The observed value is much lower than the expected value.", .contradicted),
+            ("The hypothesis is contradicted by the tools, and the remaining capacity cannot be trusted due to insufficient data.", .contradicted),
+            ("The tools say the hypothesis is contradicted; the value is at a different category.", .contradicted)
+        ]
+
+        let caught = accurate.filter { ReasonGuard.misstates($0.reason, verdict: $0.verdict) }
+
+        #expect(caught.isEmpty)
+    }
+
+    @Test func aCallThatIgnoresCancellationStillEndsAtTheDeadline() async {
+        let started = Date.now
+
+        await #expect(throws: DeadlinePassed.self) {
+            try await withDeadline(seconds: 0.1) {
+                let end = Date.now.addingTimeInterval(1)
+                while Date.now < end { await Task.yield() }
+                return 1
+            }
+        }
+
+        #expect(Date.now.timeIntervalSince(started) < 0.5)
+    }
+
+    @Test func aCallInsideTheDeadlineReturnsItsAnswer() async throws {
+        let answer = try await withDeadline(seconds: 1) { 42 }
+
+        #expect(answer == 42)
+    }
+
     @Test func theSpreadIsOneLinePerSection() {
         let menu = BuffetMenu.default.dishes.map {
             DishSighting(name: $0.name, category: $0.category, printedCategory: $0.section)
