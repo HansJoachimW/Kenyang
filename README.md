@@ -84,8 +84,9 @@ ROUND           the agent GUESSES where the value is and commits to an expected
                 → Accept · Adjust (tell it which way) · Stop, in the app or on the
                   Live Activity (Order these · Another)
 EAT             log plates (+ / −, Action Button, Siri, the Island) and rate each
-                dish once per round — rating again replaces it. Skip on a dish nobody
-                ate passes on it: no plate, no room spent, no rating
+                dish once per round: Didn't like · Fine · Good — rating again
+                replaces it. Skip means not having it: its plates and rating come
+                back off, no room spent. A wrong ingredient answer can be changed
 DECIDE          next round, from the app or the Live Activity: the tools say whether
                 the guess held → stay or change course
 STOP            capacity or seating time gone → the app says stop, then asks why
@@ -218,7 +219,7 @@ Eight `Tool` conformances passed to `LanguageModelSession(tools:)`. `ToolContext
 
 | Tool | Can refuse |
 |---|---|
-| `getSpread` | |
+| `getSpread` | — one line per printed section, with each category's prior in words (*usually liked, takes little room*) |
 | `getPosterior` | `insufficient` below 2 ratings in the category |
 | **`evaluateHypothesis`** | **supported · contradicted · insufficient** |
 | **`checkCapacityModel`** | **consistent · over · under · insufficient** |
@@ -243,7 +244,7 @@ Eight `Tool` conformances passed to `LanguageModelSession(tools:)`. `ToolContext
 | 4 Grounding | `GroundingGuard`, `OutputValidator` | A claim about a category not on tonight's menu is discarded; so is one too thin to read, or one with volume framing |
 | 5 Statistical | `StatisticalGuard` | No claim below minimum *n* |
 | 6 Action | `ExclusionValidator`, `StopGuard`, `TriageGuard`, `VerdictGuard`, `ReasonGuard`, `AdjustGuard` | Ternary exclusion; forced stop; forced decline; the move set by the tool's verdict (only a disproved guess changes course); a reason that misstates the verdict never shown as the AI's; the adjusted objective checked against the asked direction |
-| 7 Loop | `LoopBudget` | Max rounds, max calls per round, a 45 s wall clock. Every refusal names its reason in the trace |
+| 7 Loop | `LoopBudget`, `withDeadline` | Max rounds, max calls per round, a wall clock — 45 s in the app, **20 s for a round started from the widget or the Live Activity**, which iOS suspends at ~30 s. Every model call races the time left, so a hung call cannot stall a round. Every refusal names its reason in the trace |
 | 8 Safety | `RoundAgent.retrying(_:)` | One retry on transient generation failures; failures surface as `modelFailure`, never as a decision |
 
 **Several exist because measurement demanded them.** The model chose `stop` 0/3 and `decline` 0/2 times even when handed exhausted capacity — so stopping and declining are computed and forced. A prompt-injection test made the model argue for volume — so the claim is checked before display. The model writes *"the tools say the hypothesis is contradicted"* and then chooses `exploit` — so the move is overridden. **A guardrail overriding on a threshold is legitimate; Swift choosing the next action on a judgement would not be.**
@@ -272,7 +273,7 @@ Eight `Tool` conformances passed to `LanguageModelSession(tools:)`. `ToolContext
 
 Open `Kenyang.xcodeproj` and run the **Kenyang** scheme. **To run on the phone, pick it by its device name under *iOS Device*** — the Simulator is also called "iPhone 17". Apple Intelligence must be available for the agent; without it the app plans without the AI and says so.
 
-**Tests:** `Cmd-U` runs `KenyangTests` (Swift Testing, 25 tests): the skip rule, the order cap, removing a plate, one rating per round, ingredient answers, the stop guard, the avoid-list verdict, the tier refusal, the Action Button, the Live Activity phases, and a guard that planning the full menu stays under a second.
+**Tests:** `Cmd-U` runs `KenyangTests` (Swift Testing, 38 tests): the skip rule, the order cap, removing a plate, one rating per round, ingredient answers and taking them back, the ring updating, the stop guard, the avoid-list verdict, the tier refusal, the Action Button, the Live Activity phases, a round testing its guess, the verdict and reason guards against real model answers, the per-call deadline, the background round limit, and a guard that planning the full menu stays under a second.
 
 **The first launch after a reinstall sometimes stalls before anything appears.** Relaunch.
 
@@ -284,13 +285,15 @@ Every figure is from a logged run.
 
 | | |
 |---|---|
-| Unit tests, Simulator, 2026-09-30 | **25 of 25 pass.** They replaced the in-app battery (30/30 on 2026-09-29) |
+| Unit tests, Simulator, 2026-10-01 | **38 of 38 pass.** They replaced the in-app battery (30/30 on 2026-09-29) |
+| **MVP on the phone, 53 dishes, iOS 26** *(2026-10-01, tag `mvp-ios26`)* | Rounds **4–7 s**, tools called · the loop changed course, stayed, and a guard overruled the AI · widget Start → AI round 1 on the Live Activity in **~5 s** · Siri, Spotlight, Control Center |
+| Round 1 names a real category, 20 runs (Simulator) | **17/20** — the rest abstain and are shown as Kenyang's guess, never the AI's |
 | Tool calling | **8/8 tools invoked** by the model, unprompted |
 | Falsification tools returning a negative | **3/3** |
 | A hypothesis dying, then pivoting | ✅ |
 | Context, worst call site | **49% of the 4,096 window** |
 | `RoundDecision` decode | ~20% fail first attempt → **5–13% effective** after one retry |
-| Round latency, physical iPhone 17 | **~8.4 s** first round, **~3.4 s** after |
+| Round latency, physical iPhone 17, 15-dish menu | **~8.4 s** first round, **~3.4 s** after (superseded by the 53-dish row above) |
 | Menu parse, 95 items | **95/95**, nothing invented |
 | Branch selection, 20 scenarios × 3 runs | **discrimination −5%** — the move does not track the verdict (below) |
 | Adjust, the model following the diner's direction on its own | **2 of 6** over two runs — the guard steps in otherwise. Far too few to rank anything |
@@ -298,7 +301,7 @@ Every figure is from a logged run.
 
 **The Simulator is not the device.** It ran ~3× slower in early September and faster later; latency comes from the phone only. The iOS 27 Simulator has **no Apple Intelligence assets**, so every model-dependent check there is declared and unexercised.
 
-The model figures above came from measurement harnesses that were removed on 2026-09-30 to keep the app readable; they are recoverable from git history. **They were measured on a 15-dish menu.** The default menu is now 53 dishes, which roughly triples what the menu tool returns, and has not been re-measured.
+The older model figures came from measurement harnesses removed on 2026-09-30; they are recoverable from git history and were measured on a 15-dish menu. On the 53-dish menu the menu tool listing every dish **overflowed the context window**, so it now returns one line per section.
 
 **Context is not the constraint.** Tool definitions are the largest line item; tool results cost 11–28 tokens each. Output is bounded per call site by `GenerationOptions(maximumResponseTokens:)` — **not** by a `.pattern` guide, which compiles and is rejected by the device at runtime, killing every call.
 
@@ -306,22 +309,18 @@ The model figures above came from measurement harnesses that were removed on 202
 
 ## Honest status
 
-### Working
+### Working — verified on the phone, iOS 26, 2026-10-01 (tag `mvp-ios26`)
 
-A meal end to end: start from the app, the widget or Siri on the default menu; the avoid-list check; the agent's guess with a pre-registered expectation; the round goal; beam-search planning in **orders**; Adjust through the agent; plate logging with **+ / −**; one rating per dish per round, and skip as a pass on an uneaten dish; capacity accounting that learns from the diner's fullness report; the stop and its question. A home screen with the diner's usual plates, the avoid list, past meals and the tier question; the launch ring. The trace in plain words with the technical record underneath. Eight App Intents, four `IndexedEntity` types in Spotlight, an interactive snippet, an Action Button intent, a Live Activity that can carry the meal round after round without opening the app, all three Island presentations, a home-screen widget that starts and ends a meal, a Control Center control, a Dining focus filter, and an arrival trigger that usually says nothing.
-
-### Seen on hardware — 2026-09-29
-
-The **Live Activity on the phone**: it starts, updates, and **its Stop ends the meal**. The ring and the timer on the eating screen. *(Before the 2026-09-30 rewrite.)*
+A meal end to end on the 53-dish default menu, started from the app, the widget or Siri: the agent's guess with a pre-registered expectation, the round goal, planning in **orders** that always tests the guess, the loop changing course or staying on the tools' verdict with the guards visible when they overrule the AI, Adjust, plate logging with **+ / −**, one rating per dish per round, Skip as "not having it", changeable ingredient answers, a capacity ring that updates, the stop and its question. **The Live Activity carries a meal without opening the app** — widget Start plans round 1 with the AI in ~5 s. Siri, Spotlight and the Control Center control work on the phone.
 
 ### Built, not yet exercised on a phone
 
-**The Live Activity round loop and its ingredient questions · the widget's Start and End · Siri by voice with the app closed · Spotlight returning a dish · the snippet redrawing in place · the Island's Good / Skip · the Action Button and its haptic · the Control Center tile · the Dining focus row · a real arrival or calendar trigger.** The home screen, the plan, the eating screen and the widget were checked in the Simulator.
+The snippet redrawing in place · the Action Button and its haptic · the Dining focus row · the bright Lock Screen · a real arrival or calendar trigger. The Live Activity's ingredient questions and full round, and both widget states, were checked in the Simulator.
 
 ### Open defects
 
-1. **The agent's first round is slow on the 53-dish menu.** In the Simulator the guessing step ran past two minutes without finishing; planning without the AI is instant. Needs a timing on the phone.
-2. **The Lock Screen bar can render light-on-light** on the bright Lock Screen. Check on the phone before the next attempt.
+1. **Round 1's guess is weak.** It names a real category ~85% of the time, but mostly fried, rice or soup, never raw — the model does not read the priors as value. The loop corrects it from round 2.
+2. **The Lock Screen bar can render light-on-light** on the bright Lock Screen. Unchecked.
 3. **The round's plan is in memory** — relaunching mid-meal loses the rating rows until the next round is planned.
 4. **Meals started from the widget or Siri skip the avoid-list confirmation.** Dishes the list can't settle are still asked about before the round can be ordered.
 5. **Swift 6 `Sendable` warnings** where SwiftData models cross into the tool actor.
