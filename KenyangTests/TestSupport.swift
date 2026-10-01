@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 @testable import Kenyang
 
 @MainActor
@@ -40,4 +41,17 @@ func plannedItem(_ name: String, _ category: MenuCategory, orders: Int = 1, need
 
 func plan(_ items: PlannedItem...) -> RoundPlan {
     RoundPlan(items: items, rationale: "Test", reconShare: .half, posture: .balanced)
+}
+
+/// Whether a change reaches a view showing the room left, tracked the way SwiftUI tracks it.
+@MainActor
+func notifiesRoomLeft(_ session: MealSession, when change: () -> Void) -> Bool {
+    var notified = false
+    withObservationTracking {
+        _ = session.visit.map(CapacityEngine.state(for:))?.plateEstimate
+    } onChange: {
+        notified = true
+    }
+    change()
+    return notified
 }

@@ -20,6 +20,7 @@ struct RoundPlanView: View {
                     if let entry = session.trace.lastGuard { guardBox(entry) }
                     goal
                     ForEach(plan?.items ?? []) { PlannedDishCard(model: model, item: $0) }
+                    ForEach(session.ruledOut) { RuledOutRow(session: session, dish: $0) }
                     uncheckedElsewhere
                     footer
                 }
@@ -54,7 +55,7 @@ struct RoundPlanView: View {
                                      : "\(hypothesis.basis.label) · \(hypothesis.confidence.label)")
                         .font(.caption).foregroundStyle(Palette.muted)
                 }
-                Text("Guessed before you taste: you'll rate it \(Text(hypothesis.expectedRating.rawValue).bold())")
+                Text("Guessed before you taste: you'll rate it \(Text(hypothesis.expectedRating.label.lowercased()).bold())")
                     .font(.footnote)
                     .foregroundStyle(Palette.ink)
             }
@@ -181,6 +182,28 @@ private struct NoteBox: View {
     }
 }
 
+/// A dish a "yes, it contains it" answer took off the plan, with a way to take the answer back.
+private struct RuledOutRow: View {
+    let session: MealSession
+    let dish: MealSession.RuledOutDish
+
+    var body: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(dish.item.dishName).font(.subheadline).strikethrough().foregroundStyle(Palette.muted)
+                Text("You said it contains \(dish.ingredient)").font(.caption).foregroundStyle(Palette.muted)
+            }
+            Spacer()
+            Button("Undo") { session.reopen(dish.ingredient, for: dish.item.dishName) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.muted.opacity(0.4)))
+    }
+}
+
 /// One planned dish: why it's here, whether the avoid list clears it, and how many orders.
 private struct PlannedDishCard: View {
     let model: MealViewModel
@@ -191,6 +214,7 @@ private struct PlannedDishCard: View {
     var body: some View {
         let sighting = session.visit?.sighting(named: item.dishName)
         let questions = sighting.map(session.openQuestions(for:)) ?? []
+        let cleared = sighting.map(session.clearedAnswers(for:)) ?? []
 
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -223,6 +247,16 @@ private struct PlannedDishCard: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
+            }
+
+            ForEach(cleared, id: \.self) { ingredient in
+                HStack(spacing: 8) {
+                    Text("You said: no \(ingredient)").font(.caption).foregroundStyle(Palette.muted)
+                    Spacer()
+                    Button("Change") { session.reopen(ingredient, for: item.dishName) }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
 
             Divider()

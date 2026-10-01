@@ -80,8 +80,7 @@ struct ClaimRejection: Sendable, Equatable {
 
     static func check(_ claim: String, menu: [DishSighting]) -> ClaimRejection? {
         if !OutputValidator.isSubstantive(claim) {
-            return ClaimRejection(reason: .tooVague, wrote: claim,
-                                  explanation: "The AI's guess was too vague to show, so this round is planned from your numbers alone.")
+            return ClaimRejection(tooVague: claim)
         }
         if let missing = GroundingGuard.missingCategory(namedIn: claim, menu: menu) {
             return ClaimRejection(reason: .notOnMenu, wrote: claim,
@@ -92,5 +91,12 @@ struct ClaimRejection: Sendable, Equatable {
                                   explanation: "The AI's wording tripped Kenyang's filter, so it wasn't shown. The filter is strict on purpose.")
         }
         return nil
+    }
+}
+
+extension ClaimRejection {
+    init(tooVague claim: String) {
+        self.init(reason: .tooVague, wrote: claim,
+                  explanation: "The AI's guess was too vague to show, so this round is planned from your numbers alone.")
     }
 }

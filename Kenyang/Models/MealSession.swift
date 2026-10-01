@@ -15,13 +15,21 @@ protocol MealDisplay: AnyObject {
 final class MealSession {
     enum RatingResult: Equatable {
         case rated(replacedEarlier: Bool)
-        case passed
     }
 
     struct ActionButtonPress {
         let plate: TasteEvent
         let itemIndex: Int
         let at: Date
+    }
+
+    /// A dish a "yes, it contains it" answer took off the plan, kept so the answer can be
+    /// taken back until the round is accepted.
+    struct RuledOutDish: Identifiable {
+        let item: PlannedItem
+        let ingredient: String
+        let position: Int
+        var id: String { "\(item.dishName)|\(ingredient)" }
     }
 
     let store: KenyangStore
@@ -32,6 +40,7 @@ final class MealSession {
     private(set) var hypothesis: ValueHypothesis?
     private(set) var intent: RoundIntent?
     private(set) var note: String?
+    private(set) var ruledOut: [RuledOutDish] = []
     private var chosenRound = 1
     private var passedDishes: Set<String> = []
 
@@ -41,9 +50,12 @@ final class MealSession {
     init(store: KenyangStore, display: MealDisplay?) {
         self.store = store
         self.display = display
+        visit = store.activeVisit()
     }
 
-    var visit: Visit? { store.activeVisit() }
+    /// Held rather than fetched on every read: a fetch inside a view's `body` hides every
+    /// change read through it, which left the ring and the plate counts stale.
+    private(set) var visit: Visit?
     var isEating: Bool { visit?.outcome == .running }
     var round: Int { max(chosenRound, visit?.roundsPlayed ?? 1) }
 
@@ -53,22 +65,24 @@ final class MealSession {
     func start(at venueName: String = BuffetMenu.default.venueName,
                pricePerHead: Double = BuffetMenu.default.pricePerHead,
                menu: BuffetMenu = .default) -> Visit {
-        let visit = store.startVisit(at: venueName,
-                                     pricePerHead: pricePerHead,
-                                     seatingMinutes: menu.seatingMinutes,
-                                     maxSatiety: DinerPreferences.maxSatiety,
-                                     dishes: menu.dishes)
-        if let restaurant = visit.restaurant { ProactiveTrigger.shared.noteLocation(of: restaurant) }
+        let started = store.startVisit(at: venueName,
+                                       pricePerHead: pricePerHead,
+                                       seatingMinutes: menu.seatingMinutes,
+                                       maxSatiety: DinerPreferences.maxSatiety,
+                                       dishes: menu.dishes)
+        visit = started
+        if let restaurant = started.restaurant { ProactiveTrigger.shared.noteLocation(of: restaurant) }
         resetMealState()
         trace.clear()
         publish()
-        return visit
+        return started
     }
 
     func end(because ending: MealEnding) {
         guard let visit else { return }
         let finalRound = round
         store.endVisit(visit, because: ending)
+        self.visit = nil
         display?.clear(endedVisit: visit, round: finalRound)
         resetMealState()
     }
@@ -79,6 +93,7 @@ final class MealSession {
         if advancing { chosenRound = round + 1 }
         plan = nil
         note = nil
+        ruledOut = []
         setOutcome(.planning)
     }
 
@@ -98,6 +113,7 @@ final class MealSession {
     @discardableResult
     func acceptPlan() -> Bool {
         guard let plan, !plan.isEmpty, !plan.needsAnswers else { return false }
+        ruledOut = []
         setOutcome(.running)
         return true
     }
@@ -129,10 +145,11 @@ final class MealSession {
 
     func rating(of item: PlannedItem) -> Rating? {
         guard let visit else { return nil }
-        if let rated = store.plates(of: item.dishName, round: round, in: visit).first(where: \.isRated) {
-            return rated.rating
-        }
-        return isPassed(item.dishName) ? .skip : nil
+        return store.plates(of: item.dishName, round: round, in: visit).first(where: \.isRated)?.rating
+    }
+
+    func isSkipped(_ item: PlannedItem) -> Bool {
+        isPassed(item.dishName)
     }
 
     @discardableResult
@@ -155,25 +172,14 @@ final class MealSession {
         publish()
     }
 
-    /// One rating per dish per round. Skipping a dish nobody has eaten passes on it:
-    /// no plate, no capacity spent, and no rating, because an order not eaten is not a
-    /// taste.
+    /// One rating per dish per round, and a rating means the dish was eaten: *skip* is
+    /// "didn't like it", never "didn't have it". Returns nil when no meal is running.
     @discardableResult
-    func rate(_ item: PlannedItem, _ rating: Rating) -> RatingResult {
-        guard let visit else { return .passed }
+    func rate(_ item: PlannedItem, _ rating: Rating) -> RatingResult? {
+        guard let visit else { return nil }
         let plates = store.plates(of: item.dishName, round: round, in: visit)
         let result: RatingResult
-
-        if rating == .skip {
-            passedDishes.insert(passKey(item.dishName))
-            guard !plates.isEmpty else {
-                trace.record(.toolCall, "passed", "\(item.dishName) → skipped before eating, no plate logged")
-                publish()
-                return .passed
-            }
-        } else {
-            passedDishes.remove(passKey(item.dishName))
-        }
+        passedDishes.remove(passKey(item.dishName))
 
         if let rated = plates.first(where: \.isRated) {
             rated.rating = rating
@@ -195,6 +201,19 @@ final class MealSession {
         return result
     }
 
+    /// The diner isn't having this dish: its plates this round come off, its rating goes,
+    /// and no room is spent. Also undoes a plate or rating tapped by mistake.
+    func skip(_ item: PlannedItem) {
+        guard let visit else { return }
+        for plate in store.plates(of: item.dishName, round: round, in: visit) {
+            if lastActionButtonPress?.plate === plate { lastActionButtonPress = nil }
+            store.delete(plate)
+        }
+        passedDishes.insert(passKey(item.dishName))
+        trace.record(.toolCall, "passed", "\(item.dishName) → skipped, no plate kept")
+        publish()
+    }
+
     /// A plate logged by name, from Siri, whether or not it was planned.
     func logDish(named name: String, category: MenuCategory, rating: Rating?, portion: PortionBucket) {
         guard let visit else { return }
@@ -205,8 +224,13 @@ final class MealSession {
     /// The Live Activity's Good and Skip act on the next dish.
     func rateNextDish(_ rating: Rating) {
         guard let next = nextDish() else { return }
-        if rating != .skip { logPlate(of: next.item) }
+        logPlate(of: next.item)
         rate(next.item, rating)
+    }
+
+    func skipNextDish() {
+        guard let next = nextDish() else { return }
+        skip(next.item)
     }
 
     func recordFullness(_ fullness: Fullness) {
@@ -244,8 +268,8 @@ final class MealSession {
                      "\(dishName) · \(ingredient) → \(contains ? "contains it" : "cleared by the diner")")
 
         if let index = plan?.items.firstIndex(where: { $0.dishName == dishName }) {
-            if contains {
-                plan?.items.remove(at: index)
+            if contains, let removed = plan?.items.remove(at: index) {
+                ruledOut.append(RuledOutDish(item: removed, ingredient: ingredient, position: index))
                 trace.record(.plan, "dish removed", "\(dishName) contains \(ingredient). The rest of the round stands.")
             } else if openQuestions(for: sighting).isEmpty {
                 plan?.items[index].needsCheck = false
@@ -253,6 +277,28 @@ final class MealSession {
         }
         publish()
         return plan?.isEmpty == true
+    }
+
+    /// Takes back an answer given by mistake. The question is asked again, and a dish a
+    /// "yes" took off the plan goes back where it was.
+    func reopen(_ ingredient: String, for dishName: String) {
+        guard let sighting = visit?.sighting(named: dishName) else { return }
+        store.forgetAnswer(ingredient, for: sighting)
+        if let index = ruledOut.firstIndex(where: { $0.item.dishName == dishName && $0.ingredient == ingredient }) {
+            let dish = ruledOut.remove(at: index)
+            let position = min(dish.position, plan?.items.count ?? 0)
+            plan?.items.insert(dish.item, at: position)
+        }
+        if let index = plan?.items.firstIndex(where: { $0.dishName == dishName }) {
+            plan?.items[index].needsCheck = true
+        }
+        trace.record(.guardrail, "answer reopened", "\(dishName) · \(ingredient) → asked again")
+        publish()
+    }
+
+    /// The avoid-list terms the diner said this dish doesn't contain.
+    func clearedAnswers(for sighting: DishSighting) -> [String] {
+        store.exclusions().filter(sighting.clearedTerms.contains)
     }
 
     // MARK: - The AI's input
@@ -297,6 +343,7 @@ final class MealSession {
         note = nil
         chosenRound = 1
         passedDishes = []
+        ruledOut = []
         lastActionButtonPress = nil
         isAskingWhyStopping = false
     }

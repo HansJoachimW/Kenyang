@@ -65,7 +65,9 @@ final class RoundCoordinator {
         let emptied = session.answer(ingredient, contains: contains, for: dishName)
         guard emptied, let input = session.agentInput() else { return }
         session.trace.record(.plan, "re-planned", "Every planned dish was ruled out, so the round was planned again under the same objective.")
-        session.propose(planUnder(RoundAgent.objective(from: session.intent, events: input.events), input: input))
+        let objective = RoundAgent.objective(from: session.intent, events: input.events,
+                                             testing: session.hypothesis?.category)
+        session.propose(planUnder(objective, input: input))
     }
 
     // MARK: -

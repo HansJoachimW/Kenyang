@@ -9,22 +9,59 @@ struct MealSessionTests {
         let visit = try #require(session.visit)
         let spentBefore = CapacityEngine.state(for: visit).spent
 
-        let result = session.rate(edamame, .skip)
+        session.skip(edamame)
 
-        #expect(result == .passed)
+        #expect(session.isSkipped(edamame))
         #expect(session.platesEaten(of: edamame) == 0)
-        #expect(session.rating(of: edamame) == .skip)
+        #expect(session.rating(of: edamame) == nil)
         #expect(CapacityEngine.state(for: visit).spent == spentBefore)
         #expect(!visit.tasteEvents.contains { $0.isRated })
     }
 
-    @Test func skippingAfterEatingRatesThePlate() {
+    @Test func skippingAfterEatingTakesThePlatesAndRatingBack() throws {
+        let session = makeSession()
+        let harami = plannedItem("Harami", .meat, orders: 2)
+        let visit = try #require(session.visit)
+        let spentBefore = CapacityEngine.state(for: visit).spent
+        session.logPlate(of: harami)
+        session.logPlate(of: harami)
+        session.rate(harami, .good)
+
+        session.skip(harami)
+
+        #expect(session.platesEaten(of: harami) == 0)
+        #expect(session.rating(of: harami) == nil)
+        #expect(CapacityEngine.state(for: visit).spent == spentBefore)
+    }
+
+    @Test func didntLikeIsARatingOfAnEatenDish() {
+        let session = makeSession()
+        let karubi = plannedItem("Karubi", .meat)
+
+        session.rate(karubi, .skip)
+
+        #expect(session.platesEaten(of: karubi) == 1)
+        #expect(session.rating(of: karubi) == .skip)
+        #expect(!session.isSkipped(karubi))
+    }
+
+    @Test func loggingAPlateUpdatesTheRoomLeft() {
+        let session = makeSession()
+        let karubi = plannedItem("Karubi", .meat)
+
+        let notified = notifiesRoomLeft(session) { session.logPlate(of: karubi) }
+
+        #expect(notified)
+    }
+
+    @Test func removingAPlateUpdatesTheRoomLeft() {
         let session = makeSession()
         let karubi = plannedItem("Karubi", .meat)
         session.logPlate(of: karubi)
 
-        #expect(session.rate(karubi, .skip) == .rated(replacedEarlier: false))
-        #expect(session.platesEaten(of: karubi) == 1)
+        let notified = notifiesRoomLeft(session) { session.removePlate(of: karubi) }
+
+        #expect(notified)
     }
 
     @Test func nextDishMovesPastASkippedOne() {
@@ -34,7 +71,7 @@ struct MealSessionTests {
         session.propose(plan(edamame, karubi))
         session.acceptPlan()
 
-        session.rate(edamame, .skip)
+        session.skip(edamame)
 
         #expect(session.nextDish()?.item.dishName == "Karubi")
     }
@@ -42,12 +79,13 @@ struct MealSessionTests {
     @Test func eatingASkippedDishTakesThePassBack() {
         let session = makeSession()
         let edamame = plannedItem("Edamame", .vegetable)
-        session.rate(edamame, .skip)
+        session.skip(edamame)
 
         session.logPlate(of: edamame)
 
         #expect(session.platesEaten(of: edamame) == 1)
         #expect(session.rating(of: edamame) == nil)
+        #expect(!session.isSkipped(edamame))
     }
 
     @Test func platesStopAtWhatWasOrdered() {
@@ -103,6 +141,34 @@ struct MealSessionTests {
 
         #expect(session.plan?.items.map(\.dishName) == ["Karubi"])
         #expect(session.acceptPlan())
+    }
+
+    @Test func changingANoAnswerAsksTheQuestionAgain() throws {
+        let session = makeSession()
+        session.store.addExclusion("peanut")
+        session.propose(plan(plannedItem("Karubi", .meat, needsCheck: true)))
+        let karubi = try #require(session.visit?.sighting(named: "Karubi"))
+        session.answer("peanut", contains: false, for: "Karubi")
+
+        session.reopen("peanut", for: "Karubi")
+
+        #expect(session.clearedAnswers(for: karubi).isEmpty)
+        #expect(session.firstOpenQuestion()?.ingredient == "peanut")
+        #expect(!session.acceptPlan())
+    }
+
+    @Test func undoingAYesPutsTheDishBackWhereItWas() {
+        let session = makeSession()
+        session.store.addExclusion("peanut")
+        session.propose(plan(plannedItem("Harami", .meat, needsCheck: true),
+                             plannedItem("Karubi", .meat)))
+        session.answer("peanut", contains: true, for: "Harami")
+
+        session.reopen("peanut", for: "Harami")
+
+        #expect(session.plan?.items.map(\.dishName) == ["Harami", "Karubi"])
+        #expect(session.ruledOut.isEmpty)
+        #expect(session.firstOpenQuestion()?.dish == "Harami")
     }
 
     @Test func advancingARoundMovesEverySurfaceToIt() {

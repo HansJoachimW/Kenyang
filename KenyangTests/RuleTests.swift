@@ -75,6 +75,44 @@ struct RuleTests {
         #expect(Date.now.timeIntervalSince(started) < 1)
     }
 
+    @Test func aRoundTestsTheGuessWithTwoDishesFromItsCategory() {
+        let menu = BuffetMenu.default.dishes.map {
+            DishSighting(name: $0.name, category: $0.category, printedCategory: $0.section)
+        }
+        var objective = PlannerObjective.balanced
+        objective.testCategory = .soup
+
+        let plan = RoundPlanner.plan(objective: objective, candidates: menu, events: [],
+                                     capacity: CapacityState(maxSatiety: 9, spent: 0), exclusions: [])
+
+        #expect(plan.items.filter { $0.category == .soup }.count >= 2)
+    }
+
+    @Test func onlyAContradictedGuessChangesCourse() {
+        let oneRating = DishPosterior(dishName: "Meat", category: .meat, mean: 0, sampleCount: 1, uncertainty: 0.5)
+        let likedThrice = DishPosterior(dishName: "Meat", category: .meat, mean: 1, sampleCount: 3, uncertainty: 0.25)
+
+        let untested = VerdictGuard.move(for: ValueEngine.verdict(oneRating, expecting: .good))
+        let backed = VerdictGuard.move(for: ValueEngine.verdict(likedThrice, expecting: .good))
+        let disproved = VerdictGuard.move(for: ValueEngine.verdict(likedThrice, expecting: .skip))
+
+        #expect(untested == .exploit)
+        #expect(backed == .exploit)
+        #expect(disproved == .pivot)
+    }
+
+    @Test func theSpreadIsOneLinePerSection() {
+        let menu = BuffetMenu.default.dishes.map {
+            DishSighting(name: $0.name, category: $0.category, printedCategory: $0.section)
+        }
+
+        let lines = GetSpreadTool.sections(of: menu)
+
+        #expect(lines.count == 8)
+        #expect(lines.contains("SUSHI: raw 3 (usually liked, takes little room)"))
+        #expect(lines.contains("APPETIZER & AGEMONO: fried 8 (seldom a favourite, takes a lot of room), vegetable 6 (sometimes liked, takes little room), soup 1 (sometimes liked, takes a lot of room)"))
+    }
+
     @Test func mealsThatDidNotEndFullOnlyRaiseTheCapacityEstimate() {
         let store = KenyangStore(container: KenyangStore.makeContainer(inMemory: true))
         let short = store.startVisit(at: "Test", pricePerHead: 0, seatingMinutes: 90, maxSatiety: 9, dishes: [])

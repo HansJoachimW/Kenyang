@@ -26,7 +26,7 @@ struct MealCommandHandler {
         case .good:
             session.rateNextDish(.good)
         case .skip:
-            session.rateNextDish(.skip)
+            session.skipNextDish()
         case .nextRound:
             await coordinator.planRound(advancing: true)
         case .orderRound:

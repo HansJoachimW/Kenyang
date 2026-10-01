@@ -39,7 +39,7 @@ struct RateDishIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         guard let visit = session.visit else { return .result(dialog: "No meal in progress. Start a session first.") }
         session.logDish(named: dish.name, category: dish.category, rating: rating, portion: portion)
-        return .result(dialog: IntentDialog(stringLiteral: StopGuard.stopMessage(for: visit) ?? "Logged \(dish.name) as \(rating.rawValue)."))
+        return .result(dialog: IntentDialog(stringLiteral: StopGuard.stopMessage(for: visit) ?? "Logged \(dish.name) as \(rating.label.lowercased())."))
     }
 }
 

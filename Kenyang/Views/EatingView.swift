@@ -66,18 +66,20 @@ struct EatingView: View {
     }
 }
 
-/// One dish: how many of its orders were eaten, and its one rating for the round.
+/// One dish: how many of its orders were eaten, its one rating for the round, and a way
+/// to skip it that also takes back a plate or rating tapped by mistake.
 struct PlateRow: View {
     let session: MealSession
     let item: PlannedItem
 
     var body: some View {
         let eaten = session.platesEaten(of: item)
+        let isSkipped = session.isSkipped(item)
         VStack(alignment: .leading, spacing: 12) {
             Stepper(label: {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.dishName).foregroundStyle(Palette.ink)
-                    Text("\(eaten) of \(item.quantity) eaten")
+                    Text(item.dishName).foregroundStyle(isSkipped ? Palette.muted : Palette.ink)
+                    Text(isSkipped ? "Skipped" : "\(eaten) of \(item.quantity) eaten")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(Palette.muted)
                 }
@@ -86,10 +88,15 @@ struct PlateRow: View {
 
             Picker("Rating for \(item.dishName)", selection: ratingBinding) {
                 ForEach(Rating.allCases, id: \.self) { rating in
-                    Text(rating.rawValue.capitalized).tag(Optional(rating))
+                    Text(rating.label).tag(Optional(rating))
                 }
             }
             .pickerStyle(.segmented)
+
+            Button("Skip this dish") { session.skip(item) }
+                .font(.subheadline)
+                .buttonStyle(.borderless)
+                .disabled(isSkipped)
         }
         .padding(.vertical, 4)
         .sensoryFeedback(.selection, trigger: eaten)

@@ -13,6 +13,22 @@ enum ConsistencyGuard {
     }
 }
 
+/// The tool's verdict is the only authority on whether the guess held: only a disproved
+/// guess changes course, and a disproved guess always does.
+enum VerdictGuard {
+    static func move(for verdict: HypothesisVerdict) -> RoundMove {
+        verdict == .contradicted ? .pivot : .exploit
+    }
+
+    static func explanation(for verdict: HypothesisVerdict) -> String {
+        switch verdict {
+        case .contradicted: "Your ratings didn't back the guess, so Kenyang changed course."
+        case .supported:    "Your ratings back the guess, so Kenyang kept it."
+        case .insufficient: "There aren't enough ratings yet to judge the guess, so Kenyang kept it."
+        }
+    }
+}
+
 /// Why the diner asked for a different plan. A closed set, so nothing the diner types
 /// reaches a prompt.
 enum AdjustDirection: String, CaseIterable, Sendable {

@@ -42,7 +42,7 @@ struct MenuItemEntity: AppEntity, IndexedEntity {
     var displayRepresentation: DisplayRepresentation {
         var parts = [category.label]
         if !venueName.isEmpty { parts.append(venueName) }
-        if let rating { parts.append("rated \(rating.rawValue)") }
+        if let rating { parts.append("rated \(rating.label.lowercased())") }
         return DisplayRepresentation(title: "\(name)", subtitle: "\(parts.joined(separator: " · "))")
     }
 
@@ -373,7 +373,7 @@ extension Fullness: AppEnum {
 extension Rating: AppEnum {
     nonisolated static var typeDisplayRepresentation: TypeDisplayRepresentation { "Rating" }
     nonisolated static var caseDisplayRepresentations: [Rating: DisplayRepresentation] {
-        [.skip: "Skip", .fine: "Fine", .good: "Good"]
+        [.skip: "Didn't like", .fine: "Fine", .good: "Good"]
     }
 }
 

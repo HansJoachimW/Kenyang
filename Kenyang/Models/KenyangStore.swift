@@ -161,6 +161,13 @@ final class KenyangStore {
         save()
     }
 
+    func forgetAnswer(_ term: String, for sighting: DishSighting) {
+        let term = term.lowercased()
+        sighting.ingredients.removeAll { $0 == term }
+        sighting.clearedTerms.removeAll { $0 == term }
+        save()
+    }
+
     // MARK: - How the AI's guesses turn out
 
     func basisRecords() -> [BasisRecord] {

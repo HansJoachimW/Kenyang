@@ -36,6 +36,9 @@ struct PlannerObjective: Sendable {
     var avoidProfile: FlavourAxis?
     var posture: Posture
     var rationale: String
+    /// The category the round's guess names. Until enough of it is rated, the round
+    /// orders enough of it to test the guess.
+    var testCategory: MenuCategory?
 
     static let balanced = PlannerObjective(reconShare: .quarter,
                                            learnAbout: [],
@@ -86,7 +89,9 @@ struct RoundPlanner {
                              excludedCount: verdicts.excluded.count)
         guard !allowed.isEmpty, budget > 0.2 else { return plan }
 
-        let best = bestPath(from: allowed, budget: budget)
+        let guessTest = dishesTestingTheGuess(from: allowed, budget: budget)
+        let testing = Set(guessTest.map(\.name))
+        let best = bestPath(from: allowed, startingWith: guessTest, budget: budget)
         let dishes = best.reduce(into: [DishSighting]()) { distinct, sighting in
             if !distinct.contains(where: { $0.name == sighting.name }) { distinct.append(sighting) }
         }
@@ -97,16 +102,36 @@ struct RoundPlanner {
                                portion: .normal,
                                isRecon: isRecon(sighting),
                                satietyCost: cost(of: sighting) * Double(quantity),
-                               reason: reason(for: sighting),
+                               reason: testing.contains(sighting.name) ? guessTestReason : reason(for: sighting),
                                quantity: quantity,
                                needsCheck: unchecked.contains(sighting.name))
         }
         return plan
     }
 
-    private func bestPath(from allowed: [DishSighting], budget: Double) -> [DishSighting] {
-        var beam: [(path: [DishSighting], score: Double)] = [([], 0)]
-        for _ in 0..<Self.maxOrders {
+    /// An untested guess can only ever come back "insufficient", so the round orders
+    /// enough distinct dishes from its category to judge it, before anything else.
+    private func dishesTestingTheGuess(from allowed: [DishSighting], budget: Double) -> [DishSighting] {
+        guard let category = objective.testCategory else { return [] }
+        let needed = ValueEngine.minimumSamples - ValueEngine.categoryPosterior(category, events: events).sampleCount
+        guard needed > 0 else { return [] }
+        let dishes = allowed
+            .filter { $0.category == category }
+            .map { (sighting: $0, value: SatietyDiscount.discountedValue(for: $0, events: events)) }
+            .sorted { $0.value > $1.value }
+            .prefix(needed)
+            .map(\.sighting)
+        return dishes.reduce(0) { $0 + cost(of: $1) } <= budget ? dishes : []
+    }
+
+    private var guessTestReason: String {
+        "Here to test the guess about \(objective.testCategory?.label.lowercased() ?? "this kind of food")."
+    }
+
+    private func bestPath(from allowed: [DishSighting], startingWith seed: [DishSighting],
+                          budget: Double) -> [DishSighting] {
+        var beam: [(path: [DishSighting], score: Double)] = [(seed, score(seed))]
+        for _ in seed.count..<Self.maxOrders {
             let expanded = beam.flatMap { entry in
                 allowed.filter { canAdd($0, to: entry.path, budget: budget) }.map { entry.path + [$0] }
             }

@@ -56,6 +56,16 @@ enum Rating: String, Codable, CaseIterable, Sendable {
         case .good: 1.0
         }
     }
+
+    /// On screen, "Skip" means not having a dish at all, so the low rating says what it
+    /// means. The stored value stays `skip`: past ratings and the AI's prompts use it.
+    var label: String {
+        switch self {
+        case .skip: "Didn't like"
+        case .fine: "Fine"
+        case .good: "Good"
+        }
+    }
 }
 
 @Generable

@@ -38,7 +38,7 @@ actor ToolContext {
 
 struct GetSpreadTool: Tool {
     let name = "getSpread"
-    let description = "Lists the items on the menu with their category, the section they are printed under, and their price tier."
+    let description = "Lists the sections of the printed menu, how many items of each category each section holds, how well each category is typically liked and how much stomach room it takes, and its price tier."
 
     @Generable struct Arguments {}
 
@@ -50,12 +50,41 @@ struct GetSpreadTool: Tool {
             return "no dishes recorded"
         }
         await ToolContext.shared.note(name, result: "\(sightings.count) items")
-        return sightings.map { s in
-            var line = "\(s.name) [\(s.category.rawValue)]"
-            if s.tierRank > 0 { line += " TIER \(s.tierRank + 1)" }
-            if !s.printedCategory.isEmpty { line += " (\(s.printedCategory))" }
+        return Self.sections(of: sightings).joined(separator: "; ")
+    }
+
+    /// One line per printed section: listing all 53 dishes filled the context window
+    /// before `hypothesise` could answer.
+    static func sections(of sightings: [DishSighting]) -> [String] {
+        let bySection = Dictionary(grouping: sightings, by: \.printedCategory)
+        return bySection.keys.sorted().map { section in
+            let dishes = bySection[section] ?? []
+            let counts = Dictionary(grouping: dishes, by: \.category)
+                .map { (category: $0.key, count: $0.value.count) }
+                .sorted { ($1.count, $0.category.rawValue) < ($0.count, $1.category.rawValue) }
+                .map { "\($0.category.rawValue) \($0.count) (\($0.category.priorInWords))" }
+                .joined(separator: ", ")
+            var line = "\(section): \(counts)"
+            if let tier = dishes.map(\.tierRank).max(), tier > 0 { line += " TIER \(tier + 1)" }
             return line
-        }.joined(separator: "; ")
+        }
+    }
+}
+
+private extension MenuCategory {
+    static let usuallyLiked = 0.7
+    static let sometimesLiked = 0.4
+    static let takesALotOfRoom = 1.2
+    static let takesSomeRoom = 0.8
+
+    /// The priors Kenyang's own fallback guesses from, in words, so the AI has them too.
+    /// Room, not fullness: the model read "filling" as a selling point.
+    var priorInWords: String {
+        let liked = priorValue >= Self.usuallyLiked ? "usually liked"
+            : priorValue >= Self.sometimesLiked ? "sometimes liked" : "seldom a favourite"
+        let room = satietyDensity >= Self.takesALotOfRoom ? "takes a lot of room"
+            : satietyDensity >= Self.takesSomeRoom ? "takes some room" : "takes little room"
+        return "\(liked), \(room)"
     }
 }
 

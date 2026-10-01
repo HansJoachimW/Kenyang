@@ -74,7 +74,7 @@ final class RoundAgent {
         }
 
         let objective = Self.objective(from: await setIntent(hypothesis: hypothesis, input: input),
-                                       events: input.events)
+                                       events: input.events, testing: hypothesis.category)
         let plan = plan(under: objective, input: input)
         trace.record(.plan, "plan", describe(plan))
 
@@ -104,18 +104,23 @@ final class RoundAgent {
             recordAdjustFallback(proposed: proposed, adjusted: adjusted, direction: direction)
         }
 
-        let plan = plan(under: Self.objective(from: adjusted, events: input.events), input: input)
+        let plan = plan(under: Self.objective(from: adjusted, events: input.events, testing: hypothesis?.category),
+                        input: input)
         trace.record(.plan, "plan (adjusted)", describe(plan))
         return (plan, adjusted)
     }
 
-    static func objective(from intent: RoundIntent?, events: [TasteEvent]) -> PlannerObjective {
-        guard let intent else { return .balanced }
-        return PlannerObjective(reconShare: intent.reconShare,
-                                learnAbout: intent.learnAbout,
-                                avoidProfile: dominantRecentFlavour(events),
-                                posture: intent.riskPosture,
-                                rationale: intent.rationale)
+    static func objective(from intent: RoundIntent?, events: [TasteEvent],
+                          testing guess: MenuCategory?) -> PlannerObjective {
+        var objective = intent.map {
+            PlannerObjective(reconShare: $0.reconShare,
+                             learnAbout: $0.learnAbout,
+                             avoidProfile: dominantRecentFlavour(events),
+                             posture: $0.riskPosture,
+                             rationale: $0.rationale)
+        } ?? .balanced
+        objective.testCategory = guess
+        return objective
     }
 
     // MARK: - Guess
@@ -129,29 +134,35 @@ final class RoundAgent {
         let exclusion = disproved.map {
             "\nThe \($0.rawValue) has already been FALSIFIED by the ratings. Do not choose it again — name a different category."
         } ?? ""
+        let noRatingsYet = input.events.isEmpty
+            ? "\nNothing has been rated yet, so the ratings tools will say insufficient. That is expected: guess from how each category is typically liked and how much room it takes, as getSpread lists them, and name a category that is on the menu."
+            : ""
         do {
             var hypothesis = try await retrying("hypothesise") {
                 try await session.respond(
                     to: """
                         Round \(input.roundIndex). Use the tools to see the spread, the \
                         constraints and how much capacity is left, then say where the value \
-                        is concentrated and what rating you expect from that category.\(exclusion)
+                        is concentrated and what rating you expect from that category.\(exclusion)\(noRatingsYet)
                         """,
                     generating: ValueHypothesis.self,
                     options: AgentCapabilities.toolBound(300)
                 ).content
             }
+            let declined = abstention(in: hypothesis, menu: input.sightings)
             refileUntestableCategory(&hypothesis, input: input)
             if let disproved, hypothesis.category == disproved {
                 trace.record(.guardrail, "pivot guard", "Model re-proposed the falsified \(disproved.rawValue) — forced to the next best category")
                 hypothesis = bestGuess(input, excluding: disproved)
+            } else if let rejection = declined ?? ClaimRejection.check(hypothesis.claim, menu: input.sightings) {
+                hypothesis = rejectClaim(rejection, input: input, excluding: disproved)
             }
-            replaceRejectedClaim(in: &hypothesis, input: input)
+            correctSkipExpectation(&hypothesis)
 
             await recordCalledTools()
             trace.record(.hypothesis, "hypothesis",
                          "\(hypothesis.claim) [\(hypothesis.category.rawValue) · \(hypothesis.basis.rawValue) · \(hypothesis.confidence.rawValue) · expects \(hypothesis.expectedRating.rawValue)]",
-                         calculated: false)
+                         calculated: claimRejection != nil)
             return hypothesis
         } catch {
             trace.record(.modelFailure, "hypothesise failed", "\(Self.describe(error)). Falling back to the highest value density computed in Swift.")
@@ -159,11 +170,18 @@ final class RoundAgent {
         }
     }
 
+    /// The AI filed its guess nowhere testable and its words name no kind of food on the
+    /// menu: it declined to guess.
+    private func abstention(in hypothesis: ValueHypothesis, menu: [DishSighting]) -> ClaimRejection? {
+        guard !Self.isTestable(hypothesis.category, menu: menu),
+              GroundingGuard.menuCategory(namedIn: hypothesis.claim, menu: menu) == nil else { return nil }
+        return ClaimRejection(tooVague: hypothesis.claim)
+    }
+
     /// A guess filed under a category that isn't on the menu could never be tested, so it
     /// is re-filed under the category its own words name.
     private func refileUntestableCategory(_ hypothesis: inout ValueHypothesis, input: AgentInput) {
-        let onMenu = Set(input.sightings.map(\.category))
-        guard hypothesis.category == .unknown || !onMenu.contains(hypothesis.category) else { return }
+        guard !Self.isTestable(hypothesis.category, menu: input.sightings) else { return }
         let testable = GroundingGuard.menuCategory(namedIn: hypothesis.claim, menu: input.sightings)
             ?? bestGuess(input).category
         trace.record(.guardrail, "untestable category",
@@ -171,14 +189,27 @@ final class RoundAgent {
         hypothesis.category = testable
     }
 
-    private func replaceRejectedClaim(in hypothesis: inout ValueHypothesis, input: AgentInput) {
-        guard let rejection = ClaimRejection.check(hypothesis.claim, menu: input.sightings) else { return }
+    private static func isTestable(_ category: MenuCategory, menu: [DishSighting]) -> Bool {
+        category != .unknown && menu.contains { $0.category == category }
+    }
+
+    /// A rejected claim makes the whole guess Kenyang's: the AI's category, basis and
+    /// expected rating went with it.
+    private func rejectClaim(_ rejection: ClaimRejection, input: AgentInput,
+                             excluding disproved: MenuCategory?) -> ValueHypothesis {
         claimRejection = rejection
         trace.record(.guardrail, rejection.reason.label.lowercased(),
                      "Rejected before display: \"\(rejection.wrote)\" — \(rejection.explanation)")
-        let computed = bestGuess(input)
-        hypothesis.claim = computed.claim
-        if rejection.reason == .notOnMenu { hypothesis.category = computed.category }
+        return bestGuess(input, excluding: disproved)
+    }
+
+    /// Expecting a skip where it says the value is would read good ratings as disproof
+    /// and steer the next round away from food the diner likes.
+    private func correctSkipExpectation(_ hypothesis: inout ValueHypothesis) {
+        guard hypothesis.expectedRating == .skip else { return }
+        trace.record(.guardrail, "expectation guard",
+                     "Model put the value at the \(hypothesis.category.rawValue) but expected skip from it — expecting fine instead, so good ratings there back the guess rather than disprove it")
+        hypothesis.expectedRating = .fine
     }
 
     // MARK: - Decide
@@ -221,21 +252,22 @@ final class RoundAgent {
 
     private func guardedMove(_ decision: RoundDecision, verdict: HypothesisVerdict) -> RoundMove {
         var move = decision.move
+        let required = VerdictGuard.move(for: verdict)
         if !ConsistencyGuard.agrees(reason: decision.because, move: move) {
-            let forced: RoundMove = verdict == .contradicted ? .pivot : .exploit
             trace.record(.guardrail, "Consistency guard overrode the model",
                          "Reason said \"\(decision.because)\" but move was \(move.rawValue) — overridden",
-                         override: GuardOverride(wrote: decision.because, chose: move, forced: forced,
+                         override: GuardOverride(wrote: decision.because, chose: move, forced: required,
                                                  guardName: "ConsistencyGuard",
                                                  did: "The AI's reason and its choice disagreed, so Kenyang went with the reason."))
-            move = forced
+            move = required
         }
-        if verdict == .contradicted && move == .exploit {
-            trace.record(.guardrail, "Verdict guard overrode the model", "Tool said contradicted; exploit rejected",
-                         override: GuardOverride(wrote: decision.because, chose: move, forced: .pivot,
-                                                 guardName: "ConsistencyGuard",
-                                                 did: "Your ratings didn't back the guess, so Kenyang changed course."))
-            move = .pivot
+        if move != required {
+            trace.record(.guardrail, "Verdict guard overrode the model",
+                         "Tool said \(verdict.rawValue); \(move.rawValue) rejected",
+                         override: GuardOverride(wrote: decision.because, chose: move, forced: required,
+                                                 guardName: "VerdictGuard",
+                                                 did: VerdictGuard.explanation(for: verdict)))
+            move = required
         }
         return move
     }
