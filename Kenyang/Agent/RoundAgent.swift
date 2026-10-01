@@ -11,6 +11,8 @@ struct AgentInput: Sendable {
     var roundIndex: Int
     var currentHypothesis: ValueHypothesis?
     var fullnessReadings: [FullnessReading] = []
+    /// Shorter when the round runs in the background, where iOS suspends the app.
+    var secondsForRound = LoopBudget.foregroundSeconds
 
     static let empty = AgentInput(sightings: [], events: [],
                                   capacity: CapacityState(maxSatiety: 0, spent: 0),
@@ -41,7 +43,7 @@ final class RoundAgent {
     }
 
     func run(_ input: AgentInput) async -> AgentOutcome {
-        budget.beginRound()
+        budget.beginRound(within: input.secondsForRound)
         claimRejection = nil
 
         if TriageGuard.shouldDecline(menu: input.sightings) {
@@ -91,7 +93,7 @@ final class RoundAgent {
                 hypothesis: ValueHypothesis?,
                 rejected: RoundIntent,
                 direction: AdjustDirection?) async -> (RoundPlan, RoundIntent) {
-        budget.restartClock()
+        budget.restartClock(within: input.secondsForRound)
         let proposed = ModelAvailability.current.isReady
             ? await setIntent(hypothesis: hypothesis, input: input, adjusting: (rejected, direction))
             : nil

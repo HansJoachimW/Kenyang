@@ -21,7 +21,8 @@ final class RoundCoordinator {
     /// Plans the next round and proposes it. Returns the agent's outcome, so a screen can
     /// show a stop or a decline; nil when there is no meal or planning was cancelled.
     @discardableResult
-    func planRound(advancing: Bool) async -> AgentOutcome? {
+    func planRound(advancing: Bool,
+                   within seconds: TimeInterval = LoopBudget.foregroundSeconds) async -> AgentOutcome? {
         if let planningTask { return await planningTask.value }
         guard session.visit != nil else { return nil }
 
@@ -34,13 +35,15 @@ final class RoundCoordinator {
             planningTask = nil
         }
 
-        let task = Task { await runAgent() }
+        let task = Task { await runAgent(within: seconds) }
         planningTask = task
         return await task.value
     }
 
-    func adjustRound(toward direction: AdjustDirection?) async {
-        guard let input = session.agentInput() else { return }
+    func adjustRound(toward direction: AdjustDirection?,
+                     within seconds: TimeInterval = LoopBudget.foregroundSeconds) async {
+        guard var input = session.agentInput() else { return }
+        input.secondsForRound = seconds
         isPlanning = true
         defer { isPlanning = false }
         session.trace.record(.plan, "adjust requested", "The diner rejected the plan — \(direction?.label ?? "no reason given").")
@@ -72,8 +75,9 @@ final class RoundCoordinator {
 
     // MARK: -
 
-    private func runAgent() async -> AgentOutcome? {
-        guard let input = session.agentInput() else { return nil }
+    private func runAgent(within seconds: TimeInterval) async -> AgentOutcome? {
+        guard var input = session.agentInput() else { return nil }
+        input.secondsForRound = seconds
         let agent = currentAgent()
         await ToolContext.shared.observe { [progress] tool, result in
             Task { @MainActor in progress.note(tool: tool, result: result) }

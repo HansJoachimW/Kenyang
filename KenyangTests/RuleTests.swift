@@ -143,6 +143,17 @@ struct RuleTests {
         #expect(Date.now.timeIntervalSince(started) < 0.5)
     }
 
+    /// iOS suspended a widget-started round about 30 seconds in (Simulator, 2026-10-01).
+    @Test func aRoundStartedInTheBackgroundGivesUpBeforeIOSSuspendsIt() {
+        var budget = LoopBudget()
+        let started = Date.now
+
+        budget.beginRound(within: LoopBudget.backgroundSeconds)
+
+        #expect(budget.consumeCall(now: started.addingTimeInterval(5)) == nil)
+        #expect(budget.consumeCall(now: started.addingTimeInterval(25)) == .wallClockExpired)
+    }
+
     @Test func aCallInsideTheDeadlineReturnsItsAnswer() async throws {
         let answer = try await withDeadline(seconds: 1) { 42 }
 

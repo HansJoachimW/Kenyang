@@ -11,22 +11,29 @@ struct LoopBudget {
     var maxRounds = 6
     var callsPerRound = 6
     /// Clears a normal device round with one retry (~18 s) with room to spare.
-    var secondsPerRound: TimeInterval = 45
+    static let foregroundSeconds: TimeInterval = 45
+    /// A round started from the widget or the Live Activity runs in the background, and
+    /// iOS suspended one at ~30 s, leaving the Live Activity on "Planning…". It gives up on
+    /// the AI in time for Kenyang's own plan to reach the screen.
+    static let backgroundSeconds: TimeInterval = 20
+    private(set) var secondsPerRound = LoopBudget.foregroundSeconds
 
     private(set) var roundsUsed = 0
     private(set) var callsThisRound = 0
     private var roundStartedAt = Date.now
 
-    mutating func beginRound() {
+    mutating func beginRound(within seconds: TimeInterval) {
         roundsUsed += 1
         callsThisRound = 0
         roundStartedAt = .now
+        secondsPerRound = seconds
     }
 
     /// Adjust comes after the diner has read the plan, so the clock restarts; the call
     /// count carries over.
-    mutating func restartClock() {
+    mutating func restartClock(within seconds: TimeInterval) {
         roundStartedAt = .now
+        secondsPerRound = seconds
     }
 
     mutating func consumeCall(now: Date = .now) -> Refusal? {

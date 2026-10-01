@@ -20,7 +20,7 @@ struct MealCommandHandler {
         case .startMeal:
             guard session.visit == nil else { return }
             session.start(at: DiningFocus.venueForNewMeal)
-            await coordinator.planRound(advancing: false)
+            await coordinator.planRound(advancing: false, within: LoopBudget.backgroundSeconds)
         case .endMeal:
             session.end(because: .unknown)
         case .good:
@@ -28,11 +28,11 @@ struct MealCommandHandler {
         case .skip:
             session.skipNextDish()
         case .nextRound:
-            await coordinator.planRound(advancing: true)
+            await coordinator.planRound(advancing: true, within: LoopBudget.backgroundSeconds)
         case .orderRound:
             session.acceptPlan()
         case .anotherRound:
-            await coordinator.adjustRound(toward: nil)
+            await coordinator.adjustRound(toward: nil, within: LoopBudget.backgroundSeconds)
         }
     }
 }
