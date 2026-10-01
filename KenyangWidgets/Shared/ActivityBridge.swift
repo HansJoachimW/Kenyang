@@ -2,17 +2,19 @@ import AppIntents
 import Foundation
 
 /// What a button on the Live Activity or the home-screen widget asks the app to do.
-enum MealAction: String, AppEnum {
+enum MealAction: String, Sendable {
     case startMeal, endMeal, good, skip, nextRound, orderRound, anotherRound
 
-    nonisolated static var typeDisplayRepresentation: TypeDisplayRepresentation { "Meal action" }
-    nonisolated static var caseDisplayRepresentations: [MealAction: DisplayRepresentation] {
-        [.startMeal: "Start meal", .endMeal: "End meal", .good: "Good", .skip: "Skip",
-         .nextRound: "Next round", .orderRound: "Order these", .anotherRound: "Another"]
-    }
-
     var label: String {
-        Self.caseDisplayRepresentations[self].map { String(localized: $0.title) } ?? rawValue
+        switch self {
+        case .startMeal:    "Start meal"
+        case .endMeal:      "End meal"
+        case .good:         "Good"
+        case .skip:         "Skip"
+        case .nextRound:    "Next round"
+        case .orderRound:   "Order these"
+        case .anotherRound: "Another"
+        }
     }
 }
 
@@ -46,16 +48,19 @@ struct MealButtonIntent: LiveActivityIntent {
     static var title: LocalizedStringResource = "Meal button"
     static var isDiscoverable = false
 
-    @Parameter(title: "Action") var action: MealAction
+    /// The action's raw value. An `AppEnum` parameter arrived in the app as nil when the
+    /// button was pressed on a widget, so the press was cancelled and nothing happened.
+    @Parameter(title: "Action") var action: String
 
     init() {}
 
     init(_ action: MealAction) {
-        self.action = action
+        self.action = action.rawValue
     }
 
     @MainActor
     func perform() async throws -> some IntentResult {
+        guard let action = MealAction(rawValue: action) else { return .result() }
         await ActivityBridge.shared.send(.perform(action))
         return .result()
     }
