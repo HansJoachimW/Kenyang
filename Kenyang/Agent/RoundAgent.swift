@@ -132,24 +132,29 @@ final class RoundAgent {
         progress?.begin(.hypothesise)
         defer { progress?.finish(.hypothesise) }
 
-        let session = AgentCapabilities.session(tools: AgentToolbox.readTools, instructions: Self.instructions)
+        let tools = input.events.isEmpty ? AgentToolbox.firstGuessTools : AgentToolbox.readTools
+        let session = AgentCapabilities.session(tools: tools, instructions: Self.instructions)
         let exclusion = disproved.map {
             "\nThe \($0.rawValue) has already been FALSIFIED by the ratings. Do not choose it again — name a different category."
         } ?? ""
         let noRatingsYet = input.events.isEmpty
-            ? "\nNothing has been rated yet, so the ratings tools will say insufficient. That is expected: guess from how each category is typically liked and how much room it takes, as getSpread lists them, and name a category that is on the menu."
+            ? "\nNothing has been rated yet: guess from how each category is typically liked and how much room it takes, as getSpread lists them, and name a category that is on the menu."
             : ""
         do {
+            // Tools and a guided answer in one call kept the iOS 27 model calling tools until
+            // the window overflowed; looking up in plain text first, then answering, does not.
             var hypothesis = try await retrying("hypothesise") {
-                try await session.respond(
+                _ = try await session.respond(
                     to: """
                         Round \(input.roundIndex). Use the tools to see the spread, the \
                         constraints and how much capacity is left, then say where the value \
                         is concentrated and what rating you expect from that category.\(exclusion)\(noRatingsYet)
                         """,
-                    generating: ValueHypothesis.self,
-                    options: AgentCapabilities.toolBound(300)
-                ).content
+                    options: AgentCapabilities.bounded(300)
+                )
+                return try await session.respond(to: "Now give that answer in the required form.",
+                                                 generating: ValueHypothesis.self,
+                                                 options: AgentCapabilities.bounded(300)).content
             }
             let declined = abstention(in: hypothesis, menu: input.sightings)
             refileUntestableCategory(&hypothesis, input: input)
@@ -236,7 +241,7 @@ final class RoundAgent {
                         remaining capacity can still be trusted. Then decide.
                         """,
                     generating: RoundDecision.self,
-                    options: AgentCapabilities.toolBound(250)
+                    options: AgentCapabilities.bounded(250)
                 ).content
             }
             await recordCalledTools()
@@ -392,7 +397,7 @@ final class RoundAgent {
     }
 
     private static func classify(_ error: Error) -> Failure {
-        switch error as? LanguageModelSession.GenerationError {
+        switch AgentCapabilities.generationError(from: error) {
         case .decodingFailure?, .guardrailViolation?: .transient
         case .exceededContextWindowSize?: .overflow
         default: .fatal
@@ -451,7 +456,7 @@ final class RoundAgent {
     }
 
     private static func describe(_ error: Error) -> String {
-        guard let generation = error as? LanguageModelSession.GenerationError else {
+        guard let generation = AgentCapabilities.generationError(from: error) else {
             return String("\(error)".prefix(120))
         }
         switch generation {

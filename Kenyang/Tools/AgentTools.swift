@@ -251,4 +251,10 @@ enum AgentToolbox {
             GetVisitHistoryTool()
         ]
     }
+
+    /// Before anything is rated the ratings tools can only answer "insufficient", and the
+    /// model kept asking them until the context overflowed.
+    static var firstGuessTools: [any Tool] {
+        [GetSpreadTool(), GetConstraintsTool(), GetRemainingCapacityTool()]
+    }
 }

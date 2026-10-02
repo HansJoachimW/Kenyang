@@ -1,11 +1,12 @@
 import FoundationModels
 
-/// The one place that branches on iOS 27, where the framework enforces tool calls and
-/// rolls back failed turns. On iOS 26 both are instructions and retries instead.
+/// The one place that branches on iOS 27, where the framework rolls back failed turns.
+/// Tool calling stays an instruction on both: `ToolCallingMode.required` kept the model
+/// calling tools until the context overflowed.
 enum AgentCapabilities {
     static var summary: String {
         if #available(iOS 27.0, *) {
-            return "iOS 27 — tool calling enforced, failed turns reverted"
+            return "iOS 27 — tool calling instructed, failed turns reverted"
         }
         return "iOS 26 — tool calling instructed, failed turns retained"
     }
@@ -22,10 +23,18 @@ enum AgentCapabilities {
         GenerationOptions(maximumResponseTokens: tokens)
     }
 
-    static func toolBound(_ tokens: Int) -> GenerationOptions {
-        if #available(iOS 27.0, *) {
-            return GenerationOptions(maximumResponseTokens: tokens, toolCallingMode: .required)
+    /// iOS 27 reports model failures as `LanguageModelError`; the agent's retry rules are
+    /// written against `GenerationError`, so the cases they act on are mapped across.
+    static func generationError(from error: Error) -> LanguageModelSession.GenerationError? {
+        if let generation = error as? LanguageModelSession.GenerationError { return generation }
+        guard #available(iOS 27.0, *), let modelError = error as? LanguageModelError else { return nil }
+        switch modelError {
+        case .contextSizeExceeded(let overflow):
+            return .exceededContextWindowSize(.init(debugDescription: overflow.debugDescription))
+        case .guardrailViolation(let violation):
+            return .guardrailViolation(.init(debugDescription: violation.debugDescription))
+        default:
+            return nil
         }
-        return GenerationOptions(maximumResponseTokens: tokens)
     }
 }

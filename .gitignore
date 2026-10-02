@@ -57,3 +57,6 @@ playground.xcworkspace
 ## Prompts
 CLAUDE.md
 /prompts
+
+## Outputs
+/output

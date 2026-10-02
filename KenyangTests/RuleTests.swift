@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 import Testing
 @testable import Kenyang
 
@@ -206,5 +207,16 @@ struct RuleTests {
         }
         #expect(visits == 0)
         #expect(needed == TierEngine.minimumVisits)
+    }
+
+    @Test func anIOS27ContextOverflowIsReadAsAnOverflow() {
+        guard #available(iOS 27.0, *) else { return }
+        let overflow = LanguageModelError.contextSizeExceeded(
+            .init(contextSize: 4096, tokenCount: 4099, debugDescription: "Content contains 4099 tokens"))
+
+        guard case .exceededContextWindowSize? = AgentCapabilities.generationError(from: overflow) else {
+            Issue.record("An iOS 27 overflow must reach the overflow path")
+            return
+        }
     }
 }
